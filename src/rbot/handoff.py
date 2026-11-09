@@ -10,8 +10,8 @@ from pathlib import Path
 SECTIONS = ("Request", "Sources", "Findings", "Calculations", "Gaps", "Next module")
 _QUOTE = re.compile(r"\"([^\"]*)\"|“([^”]*)”")
 _CITATION = re.compile(r"\s*\[([^\]]+?) p\.(\d+)\]")
-_H2 = re.compile(r"^## (.+?)\s*$")
-_FENCE = re.compile(r"^```\s*(\S*)\s*$")
+H2 = re.compile(r"^## (.+?)\s*$")
+FENCE = re.compile(r"^```\s*(\S*)\s*$")
 _TRANSLATE = str.maketrans("“”‘’–—", "\"\"''--")
 _SPACED_DASH_WRAP = re.compile(r"(?<=\s)[–—]\s*\n\s*")
 _DASH_WRAP = re.compile(r"[–—]\s*\n\s*")
@@ -28,11 +28,16 @@ def normalise(text: str, hyphen_wrap: str = "") -> str:
     return " ".join(text.split())
 
 
+def split_lines(text: str) -> list[str]:
+    """The line splitter the checker uses; the renderer must split the same way."""
+    return text.splitlines()
+
+
 def _lines(text: str) -> Iterator[tuple[str, bool, str]]:
     """Yield (line, in_fence, fence_info) so headings inside fences are ignored."""
     fence: str | None = None
-    for line in text.splitlines():
-        m = _FENCE.match(line)
+    for line in split_lines(text):
+        m = FENCE.match(line)
         if m and fence is None:
             fence = m.group(1)
             yield line, True, fence
@@ -44,7 +49,7 @@ def _lines(text: str) -> Iterator[tuple[str, bool, str]]:
 
 
 def _section_findings(text: str) -> list[str]:
-    seen = [m.group(1) for line, fenced, _ in _lines(text) if not fenced and (m := _H2.match(line))]
+    seen = [m.group(1) for line, fenced, _ in _lines(text) if not fenced and (m := H2.match(line))]
     found = [h for h in seen if h in SECTIONS]
     out = [f"missing section: ## {s}" for s in SECTIONS if s not in found]
     out += [f"duplicate section: ## {s}" for s in SECTIONS if found.count(s) > 1]
@@ -58,13 +63,13 @@ def _json_blocks(text: str) -> list[str]:
     section = ""
     blocks: list[list[str]] = []
     for line, fenced, info in _lines(text):
-        heading = None if fenced else _H2.match(line)
+        heading = None if fenced else H2.match(line)
         if heading:
             section = heading.group(1)
-        elif section == "Calculations" and fenced and not _FENCE.match(line):
+        elif section == "Calculations" and fenced and not FENCE.match(line):
             if info == "json":
                 blocks[-1].append(line)
-        elif section == "Calculations" and info == "json" and _FENCE.match(line):
+        elif section == "Calculations" and info == "json" and FENCE.match(line):
             blocks.append([])
     return ["\n".join(b) for b in blocks]
 

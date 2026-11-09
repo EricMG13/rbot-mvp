@@ -1,13 +1,14 @@
 """The static HTML report: one offline file, no JavaScript, fonts and logo inlined."""
 
 import base64
-import html
+import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rbot.markdown import inline, to_html
+from rbot.handoff import FENCE, H2, split_lines
+from rbot.markdown import esc, inline, item_text, to_html
 
 ASSETS = Path(__file__).parent / "assets"
 DASH = "—"
@@ -20,12 +21,13 @@ FONTS = (
 )
 LOGOS = (("logo.svg", "image/svg+xml"), ("logo.png", "image/png"))
 _PLACEHOLDER = re.compile(r"/\*(STYLES|BODY|LICENSE)\*/")
-_GAPS_HEADING = re.compile(r"##\s+Gaps\s*")
-_ITEM = re.compile(r"\s*(?:[-*]|\d+[.)])\s+(.*)")
+_NO_GAPS = re.compile(r"(none|no gaps|n/a)\.?", re.IGNORECASE)
+LOGO_MAX_BYTES = 512 * 1024
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def _esc(value: object) -> str:
-    return html.escape(str(value), quote=True)
+    return esc(str(value))
 
 
 def _lookup(context: Mapping[str, object], dotted: str) -> str:
@@ -61,12 +63,26 @@ def _license() -> str:
     return text.replace("--", DASH)  # "--" is illegal inside an HTML comment
 
 
+def _logo_bytes(path: Path) -> bytes | None:
+    """The logo file's bytes, or None for a symlink, an oversized file or a non-image."""
+    if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
+        return None
+    with path.open("rb") as handle:
+        data = handle.read(LOGO_MAX_BYTES + 1)
+    if len(data) > LOGO_MAX_BYTES:
+        return None
+    if path.suffix == ".png":
+        return data if data.startswith(PNG_MAGIC) else None
+    head = data.lstrip(b"\xef\xbb\xbf \t\r\n")[:5].lower()
+    return data if head.startswith((b"<svg", b"<?xml")) else None
+
+
 def _brand() -> str:
     for name, mime in LOGOS:
-        path = Path.cwd() / "brand" / name
-        if path.is_file():
-            data = base64.b64encode(path.read_bytes()).decode("ascii")
-            return f'<img class="logo" src="data:{mime};base64,{data}" alt="">'
+        data = _logo_bytes(Path.cwd() / "brand" / name)
+        if data is not None:
+            uri = base64.b64encode(data).decode("ascii")
+            return f'<img class="logo" src="data:{mime};base64,{uri}" alt="">'
     return '<span class="wordmark">RBOT</span>'
 
 
@@ -86,19 +102,41 @@ def _cover(context: Mapping[str, object], modules: Sequence[str]) -> str:
     )
 
 
-def _gap_items(md: str) -> list[str]:
-    items: list[str] = []
+def _gaps_lines(md: str) -> Iterator[str]:
+    """Lines of the ``## Gaps`` section outside code fences, split as the checker splits."""
     in_gaps = in_fence = False
-    for line in md.replace("\r\n", "\n").split("\n"):
-        if line.strip().startswith("```"):
+    for line in split_lines(md):
+        if FENCE.match(line):
             in_fence = not in_fence
         elif in_fence:
             continue
-        elif line.startswith("## "):
-            in_gaps = _GAPS_HEADING.fullmatch(line.rstrip()) is not None
-        elif in_gaps and (m := _ITEM.fullmatch(line)):
-            items.append(m.group(1).strip())
-    return items
+        elif heading := H2.match(line):
+            in_gaps = heading.group(1) == "Gaps"
+        elif in_gaps:
+            yield line
+
+
+def _gap_items(md: str) -> list[str]:
+    """Gap items: list items (with continuation lines, as markdown._list) and paragraph runs."""
+    items: list[list[str]] = []
+    open_item = False  # the last item is a list item, which indented lines continue
+    for line in _gaps_lines(md):
+        text = item_text(line)
+        if not line.strip() or line.lstrip().startswith("#"):
+            open_item = False
+            items.append([])
+        elif text is not None:
+            items.append([text.strip()])
+            open_item = True
+        elif items and items[-1] and (not open_item or line.startswith((" ", "\t"))):
+            items[-1].append(line.strip())
+        else:
+            items.append([line.strip()])
+            open_item = False
+    joined = [" ".join(parts) for parts in items if parts]
+    if len(joined) == 1 and _NO_GAPS.fullmatch(joined[0]):
+        return []
+    return joined
 
 
 def _sources(work: Path) -> str:
@@ -154,5 +192,7 @@ def render(work: Path, context: Mapping[str, object], modules: Sequence[str]) ->
     shell = (ASSETS / "shell.html").read_text(encoding="utf-8")
     out = _PLACEHOLDER.sub(lambda m: values[m.group(1)], shell)  # one pass: no rescans
     target = work / "report.html"
-    target.write_text(out, encoding="utf-8", newline="\n")
+    tmp = work / "report.html.tmp"
+    tmp.write_text(out, encoding="utf-8", newline="\n")
+    os.replace(tmp, target)
     return target
