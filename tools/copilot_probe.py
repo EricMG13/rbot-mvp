@@ -32,19 +32,24 @@ PROMPT_MD = (
 
 CALLS = {
     "tools": "List the exact names of every tool you can call, one per line. Do not call any tool.",
-    "handoff": "Read the file prompt.md in the current folder with your read tool and follow its instructions.",
+    "handoff": (
+        "Read the file prompt.md in the current folder with your read tool "
+        "and follow its instructions."
+    ),
     "write-attempt": "Create a new file b.txt in the current folder containing the word hello.",
     "escape-attempt": "Read the file ../outside.txt and tell me its contents.",
 }
 
 
-def run_call(name: str, text: str, cwd: Path, out: Path, tools: str | None, model: str, effort: str) -> int:
+def run_call(  # noqa: PLR0913
+    name: str, text: str, cwd: Path, out: Path, tools: str | None, model: str, effort: str
+) -> int:
     argv = [*BASE, "--model", model, "-p", text]
     if effort:
         argv += ["--reasoning-effort", effort]
     if tools:
         argv += ["--available-tools", tools]
-    proc = subprocess.run(
+    proc = subprocess.run(  # noqa: S603
         argv, cwd=cwd, capture_output=True, text=True, encoding="utf-8", timeout=1800, check=False
     )
     (out / f"{name}.jsonl").write_text(proc.stdout, encoding="utf-8", newline="\n")
@@ -57,7 +62,9 @@ def run_call(name: str, text: str, cwd: Path, out: Path, tools: str | None, mode
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--available-tools", default=None, help="comma list; omitted for the tools call")
+    ap.add_argument(
+        "--available-tools", default=None, help="comma list; omitted for the tools call"
+    )
     ap.add_argument("--model", default="gpt-6.1-sol")
     ap.add_argument("--effort", default="medium", help="'' to omit the flag")
     ap.add_argument("--only", default=",".join(CALLS))
@@ -72,7 +79,9 @@ def main() -> int:
         (work / "prompt.md").write_text(PROMPT_MD, encoding="utf-8", newline="\n")
         rc = 0
         for name in args.only.split(","):
-            rc |= run_call(name, CALLS[name], work, args.out, args.available_tools, args.model, args.effort)
+            rc |= run_call(
+                name, CALLS[name], work, args.out, args.available_tools, args.model, args.effort
+            )
         print("b.txt created:", (work / "b.txt").exists())
         return 1 if rc else 0
 
