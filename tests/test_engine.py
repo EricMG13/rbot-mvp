@@ -951,6 +951,9 @@ def test_cp1_is_implemented_and_prompt_keeps_the_amendments() -> None:
         "its page map is a pointer, not evidence",
         "every `value` is a json string",
         "`maturity_<year>`",
+        "cash-flow quality, liquidity, data quality, definition risks, key gaps",
+        "non-debt liability detail line",
+        "every sourced value and every derived component",
     ):
         assert phrase in text, phrase
     for field in cp1.FIELDS:

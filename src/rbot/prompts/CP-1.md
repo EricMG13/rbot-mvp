@@ -121,7 +121,17 @@ confirm each page with your grep tool before you rely on it, and cite only pages
     figures (rose from X to Y) is allowed.
 17. Subsequent events and other disclosures that change debt, liquidity or the perimeter after the
     balance sheet date are findings with quotes, or gaps if unreadable.
-18. Readiness (amendment 4): judge which downstream uses the evidence supports (leverage ratios,
+18. Coverage. Address each of these dimensions by name: leverage, coverage, cash-flow quality,
+    liquidity, data quality, definition risks, key gaps. Each addressed dimension has Findings with
+    the usual verbatim quote and citation. A dimension you do not address, or cannot assess from
+    the sources, is a `## Gaps` item naming that dimension. Not applicable needs evidence: quote
+    what shows the dimension does not apply.
+19. Funding review. Review every balance-sheet detail line outside the standard items. A non-debt
+    liability detail line (for example pensions, leases, deferred or contingent consideration,
+    other long-term liabilities) is a material funding item and gets its own Findings item with a
+    quote, for each period you tell. Equity rows, asset rows and long-term debt are not funding
+    items. Any such line you did not review is a `## Gaps` item.
+20. Readiness (amendment 4): judge which downstream uses the evidence supports (leverage ratios,
     liquidity, interest cover, a maturity profile, a quarterly model, covenant testing) and which
     stay restricted, grouped by underlying issue, each with the affected values, periods and
     locators. A genuine identity ambiguity, unusable required content or missing required statement
@@ -130,7 +140,8 @@ confirm each page with your grep tool before you rely on it, and cite only pages
 ## Proof required
 
 - Currency, unit, periods and fiscal year end match the cited pages.
-- Every JSON value is printed on its cited page and the calculator confirms it.
+- Every sourced value and every derived component is printed on its cited page and the
+  calculator confirms it; a derived row's total is computed, not printed.
 - No unsupported completeness, credit or valuation conclusion appears.
 - No earlier model answer is an authoritative source: inspect the files directly.
 
