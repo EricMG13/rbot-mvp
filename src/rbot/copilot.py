@@ -67,11 +67,16 @@ class _Stream:
 
     def message(self, data: dict[str, Any]) -> None:
         requests = data.get("toolRequests") or []
+        if not isinstance(requests, list):
+            raise CopilotError("assistant.message: toolRequests is not a list")
         for req in requests:
             if not isinstance(req, dict) or req.get("name") not in READ_ONLY_TOOLS:
                 _add(self.forbidden, req.get("name") if isinstance(req, dict) else None)
         if not requests:
-            self.text, self.model = data.get("content", ""), data.get("model")
+            content = data.get("content", "")
+            if not isinstance(content, str):
+                raise CopilotError("assistant.message: content is not a string")
+            self.text, self.model = content, data.get("model")
 
     def start(self, data: dict[str, Any]) -> None:
         name = data.get("toolName")
@@ -116,7 +121,40 @@ class _Stream:
             self.result = event
 
 
+def completed_forbidden(lines: Iterable[str]) -> tuple[str, ...]:
+    """Tolerant scan: forbidden tools that completed with success; bad lines are skipped."""
+    stream = _Stream()
+    for raw in lines:
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        data = event.get("data") if isinstance(event, dict) else None
+        if isinstance(data, dict) and event.get("type") == "tool.execution_start":
+            stream.start(data)
+        elif isinstance(data, dict) and event.get("type") == "tool.execution_complete":
+            stream.complete(data)
+    return tuple(stream.ran)
+
+
+def _violation(ran: tuple[str, ...]) -> SandboxViolation:
+    return SandboxViolation(f"tool outside read-only set ran: {', '.join(ran)}")
+
+
 def parse_events(lines: Iterable[str]) -> CallResult:
+    """Parse a stream; a completed forbidden tool wins over any other failure (SandboxViolation)."""
+    kept = list(lines)
+    try:
+        return _parse(kept)
+    except SandboxViolation:
+        raise
+    except CopilotError as err:
+        if ran := completed_forbidden(kept):
+            raise _violation(ran) from err
+        raise
+
+
+def _parse(lines: Iterable[str]) -> CallResult:
     stream = _Stream()
     for raw in lines:
         if raw.strip():
@@ -127,7 +165,7 @@ def parse_events(lines: Iterable[str]) -> CallResult:
     if stream.result is None:
         raise CopilotError("no result line in the event stream")
     code = stream.result.get("exitCode")
-    if code != 0:
+    if type(code) is not int or code != 0:
         raise CopilotError(f"result reported exit {code}")
     if stream.text is None:
         raise CopilotError("no final assistant message in the event stream")
@@ -231,17 +269,22 @@ def call(  # noqa: PLR0913
     out = out.replace(b"\r\n", b"\n")
     (attempt / "events.jsonl").write_bytes(out)
     (attempt / "stderr.txt").write_bytes(err)
-    if code is None:
-        raise CopilotError(f"timeout after {timeout:g} s")
-    if code != 0:
+    lines = out.decode("utf-8", errors="replace").split("\n")
+    if code is None or code != 0:
+        if ran := completed_forbidden(lines):
+            raise _violation(ran)
+        if code is None:
+            raise CopilotError(f"timeout after {timeout:g} s")
         text = err.decode("utf-8", errors="replace").strip()[:STDERR_LIMIT]
         raise CopilotError(f"gh copilot exit {code}: {text}")
     try:
-        decoded = out.decode("utf-8")
+        out.decode("utf-8")
     except UnicodeDecodeError as exc:
+        if ran := completed_forbidden(lines):
+            raise _violation(ran) from None
         raise CopilotError(f"stdout is not valid UTF-8: {exc}") from None
     # split on LF only: str.splitlines also splits on U+2028 that JSON may carry unescaped
-    result = parse_events(decoded.split("\n"))
+    result = parse_events(lines)
     if result.ran:
-        raise SandboxViolation(f"tool outside read-only set ran: {', '.join(result.ran)}")
+        raise _violation(result.ran)
     return replace(result, seconds=time.monotonic() - started)

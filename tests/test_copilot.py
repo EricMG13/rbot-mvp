@@ -118,6 +118,17 @@ def test_result_nonzero_exit_raises() -> None:
         [json.dumps({"type": "assistant.message", "data": ["x"]}), FINAL, result_line()],
         [json.dumps({"type": "session.error", "data": {"message": "boom"}}), FINAL, result_line()],
         ["{not json", FINAL, result_line()],
+        [
+            json.dumps({"type": "assistant.message", "data": {"toolRequests": 5}}),
+            FINAL,
+            result_line(),
+        ],
+        [
+            json.dumps({"type": "assistant.message", "data": {"content": 7, "toolRequests": []}}),
+            result_line(),
+        ],
+        [FINAL, json.dumps({"type": "result", "exitCode": False})],
+        [FINAL, json.dumps({"type": "result", "exitCode": 0.0})],
     ],
 )
 def test_malformed_streams_raise_copilot_error(stream: list[str]) -> None:
@@ -237,3 +248,46 @@ def test_attempt_dir_dotdot_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="inside"):
         call("p", cwd=work, attempt_dir=work / ".." / "outside", gh=FAKE)
     assert not (tmp_path / "outside").exists()
+
+
+SYN_BODY = [
+    line
+    for line in lines("synthetic-forbidden-tool-events.jsonl")
+    if line.strip() and json.loads(line)["type"] != "result"
+]
+SYN_NO_FINAL = [line for line in SYN_BODY if '"content":"done"' not in line]
+ERR_EVENT = json.dumps({"type": "session.error", "data": {"message": "boom"}})
+
+
+@pytest.mark.parametrize(
+    "stream",
+    [
+        [*SYN_BODY, result_line(1)],
+        [*SYN_BODY, ERR_EVENT, result_line()],
+        [*SYN_NO_FINAL, result_line()],
+        ["not json", *SYN_BODY, '{"type":"tool.exec', result_line(0)],
+        [*SYN_BODY, FINAL, "[]", result_line()],
+    ],
+)
+def test_sandbox_violation_wins_over_other_parse_failures(stream: list[str]) -> None:
+    with pytest.raises(SandboxViolation, match="create"):
+        parse_events(stream)
+
+
+def test_sandbox_violation_wins_over_gh_exit_and_timeout(tmp_path: Path) -> None:
+    syn = str(FIX / "synthetic-forbidden-tool-events.jsonl")
+    with pytest.raises(SandboxViolation, match="create"):
+        call(
+            "p",
+            cwd=tmp_path,
+            attempt_dir=tmp_path / "a",
+            gh=gh_with("--fixture", syn, "--exit", "1"),
+        )
+    with pytest.raises(SandboxViolation, match="create"):
+        call(
+            "p",
+            cwd=tmp_path,
+            attempt_dir=tmp_path / "b",
+            gh=gh_with("--fixture", syn, "--sleep", "30"),
+            timeout=1,
+        )
