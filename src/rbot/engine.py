@@ -109,10 +109,18 @@ def _write_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _refuse_overlap(case: Path, work: Path) -> None:
+    """The source rebuild deletes work/sources and work/source-text: never near the case."""
+    c, w = case.resolve(), work.resolve()
+    if c.is_relative_to(w) or w.is_relative_to(c):
+        raise ContextError("--out must be outside the case folder and the case outside --out")
+
+
 def stage_sources(case: Path, work: Path) -> None:
     """Rebuild work/sources and work/source-text from the case; refuse unsafe entries."""
     for name in ("sources", "source-text"):
-        shutil.rmtree(work / name, ignore_errors=True)
+        if (work / name).exists():
+            shutil.rmtree(work / name)
     (work / "sources").mkdir(parents=True)
     for path in sorted(case.iterdir()):
         name = path.name
@@ -167,7 +175,7 @@ def _log(work: Path, **entry: Any) -> None:
 
 def _findings(result: CallResult, text: str, source_text: Path) -> list[str]:
     found = [VIOLATION.format(v) for v in result.violations]
-    return found + check(text, source_text)
+    return found + check(text, source_text, quoted_findings=True)
 
 
 @dataclass(frozen=True)
@@ -224,13 +232,18 @@ def _attempt_once(
 
 
 NO_CITATION = "no citation right after it"
+NO_QUOTE = "Findings item with no verified quote"
+QUOTE_RULE = (
+    "Back every Findings item with at least one verbatim quote (12+ characters) and its citation."
+)
 
 
 def _accepted(handoff: Path, fp: Path, fingerprint: str, source_text: Path) -> bool:
     """A stored handoff is trusted only if its fingerprint matches and the checker still passes."""
     if not (handoff.is_file() and fp.is_file() and _read(fp).strip() == fingerprint):
         return False
-    return not check(handoff.read_text(encoding="utf-8", errors="replace"), source_text)
+    stored = handoff.read_text(encoding="utf-8", errors="replace")
+    return not check(stored, source_text, quoted_findings=True)
 
 
 def _run_module(module: str, prompt: str, setup: Setup) -> None:
@@ -243,7 +256,9 @@ def _run_module(module: str, prompt: str, setup: Setup) -> None:
     for n in range(1, ATTEMPTS + 1):
         text_prompt = prompt
         if findings:
-            rule = f"\n{CITATION_RULE}\n" if any(NO_CITATION in f for f in findings) else ""
+            rules = [CITATION_RULE] * any(NO_CITATION in f for f in findings)
+            rules += [QUOTE_RULE] * any(NO_QUOTE in f for f in findings)
+            rule = "".join(f"\n{r}\n" for r in rules)
             text_prompt += (
                 "\n\n## Findings from your previous attempt\n\nFix every item and reply with the "
                 f"complete handoff again:{rule}\n" + "\n".join(f"- {f}" for f in findings)
@@ -265,6 +280,7 @@ def run_case(
     modules: Sequence[str] | None = None,
     prompts: Path = PROMPTS_DIR,
 ) -> Path:
+    _refuse_overlap(case, work)
     context = load_context(case)
     settings = _model_settings()
     names = modules or [m for m in PATHWAYS[context["run"]["pathway"]] if m in IMPLEMENTED]

@@ -89,7 +89,8 @@ model, covenant opinion, full credit report or transaction assessment.
   a page, then the verdict and the analysis above.
 - `## Calculations`: write "Not applicable to CP-0."
 - `## Gaps`: a bulleted list, one item per gap. Each item gives an identifier, the affected work
-  and the action. Write `- None` if there is no gap.
+  and the action. Every limitation behind a verdict of ready with limitations, conditional or
+  blocked is a Gaps item; write `- None` only with READY.
 - `## Next module`: for CP-1, the permitted scope, the source page map (file and page
   numbers of the primary statements) and the inherited limitations, so CP-1 can find its pages
   without the user re-explaining the request.

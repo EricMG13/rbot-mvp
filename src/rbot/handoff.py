@@ -162,8 +162,45 @@ def _paragraph_findings(
     return out
 
 
-def check(text: str, source_text: Path, *, require_json: bool = False) -> list[str]:
+_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+
+
+def _findings_units(text: str) -> list[str]:
+    """Each list item and paragraph of ## Findings, outside fences, split as the renderer does."""
+    units: list[list[str]] = []
+    current: list[str] | None = None
+    section = ""
+    for line, fenced, _ in _lines(text):
+        if fenced:
+            continue
+        if heading := H2.match(line):
+            section, current = heading.group(1), None
+        elif section != "Findings":
+            continue
+        elif not line.strip() or line.lstrip().startswith("#"):
+            current = None
+        elif current is None or _ITEM.match(line):
+            current = [line.strip()]
+            units.append(current)
+        else:
+            current.append(line.strip())
+    return ["\n".join(u) for u in units]
+
+
+def _unquoted_findings(text: str) -> list[str]:
+    out = []
+    for unit in _findings_units(text):
+        if not any(len(m.group(1) or m.group(2)) >= 12 for m in _QUOTE.finditer(unit)):
+            out.append(f'Findings item with no verified quote: "{unit[:60]}"')
+    return out
+
+
+def check(
+    text: str, source_text: Path, *, require_json: bool = False, quoted_findings: bool = False
+) -> list[str]:
     out = _section_findings(text)
+    if quoted_findings:
+        out += _unquoted_findings(text)
     cache: dict[tuple[str, str], str | None] = {}
     for para in _PARAGRAPHS.split(_prose(text)):
         out += _paragraph_findings(para, source_text, cache)

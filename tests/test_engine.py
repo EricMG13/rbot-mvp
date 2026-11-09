@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -553,3 +554,59 @@ def test_failed_md_names_the_module_for_a_copilot_error(
 ) -> None:
     assert cli_with(monkeypatch, case, case.script("not json\n")) == 1
     assert "Module: CP-0" in failed_md(case)
+
+
+# ---- fix round 2 ----
+
+
+def test_engine_requires_a_quote_in_every_findings_item(case: Case) -> None:
+    bare = VALID.replace(
+        'The issuer is "Acme Corp annual report" [a.txt p.1], as of 2025-03-31, FY2024.',
+        'The issuer is "Acme Corp annual report" [a.txt p.1].\n\n- FY2024 is the period.',
+    )
+    run_case(case.case, case.work, gh=case.script(events(bare), events(VALID)))
+    first, second = case.log()
+    assert "Findings item with no verified quote" in json.dumps(first["findings"])
+    assert second["outcome"] == "accepted"
+    retry = " ".join(prompt_of(case, n=2).split("## Findings from your previous")[1].split())
+    assert "Back every Findings item with at least one verbatim quote" in retry
+    assert "every item and paragraph of `## Findings`" in " ".join(prompt_of(case, n=1).split())
+
+
+@pytest.mark.parametrize("layout", ["case-is-out", "out-contains-case", "case-in-sources"])
+def test_out_overlapping_the_case_is_refused(
+    case: Case, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    keep = case.case / "sources" / "notes.txt"
+    keep.parent.mkdir()
+    keep.write_text("my notes", encoding="utf-8")
+    out = case.case
+    target = case.case
+    if layout == "out-contains-case":
+        out = case.root
+    elif layout == "case-in-sources":
+        target = keep.parent
+        (target / "context.json").write_text(json.dumps(CONTEXT), encoding="utf-8")
+        out = case.case
+    monkeypatch.setattr(cli, "run_case", lambda c, o: run_case(c, o, gh=case.script(events(VALID))))
+    assert cli.main(["run", str(target), "--out", str(out)]) == 1
+    assert "outside the case folder" in (out / "FAILED.md").read_text(encoding="utf-8")
+    assert keep.read_text(encoding="utf-8") == "my notes"
+    assert case.calls() == 0
+
+
+def test_failed_source_cleanup_fails_the_run(case: Case, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+
+    def refuse(path: object, *a: object, **k: object) -> None:
+        assert not k.get("ignore_errors")
+        raise PermissionError("cannot delete")
+
+    monkeypatch.setattr(shutil, "rmtree", refuse)
+    with pytest.raises(PermissionError):
+        run_case(case.case, case.work, gh=case.script(events(VALID)))
+
+
+def test_cp0_prompt_requires_gaps_for_limitations() -> None:
+    text = " ".join((PROMPTS_DIR / "CP-0.md").read_text(encoding="utf-8").split())
+    assert "`- None` only with READY" in text
