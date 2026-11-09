@@ -87,7 +87,7 @@ model, covenant opinion, full credit report or transaction assessment.
 - `## Sources`: each source file, its document family, authority, perimeter and what you read.
 - `## Findings`: must state the issuer, the as-of date and the periods covered, then the
   analysis above. Every Findings item is evidence: it carries at least one verbatim quote and
-  its citation. Do not put the verdict in Findings.
+  its citation. Do not put the verdict, a sufficiency or adequacy conclusion, or a summary in Findings: those go in `## Next module`, after the `Verdict:` line.
 - `## Calculations`: write "Not applicable to CP-0."
 - `## Gaps`: a bulleted list, one item per gap. Each item gives an identifier, the affected work
   and the action. Every limitation behind a verdict of ready with limitations, conditional or

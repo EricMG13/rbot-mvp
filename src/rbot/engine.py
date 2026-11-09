@@ -15,7 +15,7 @@ from rbot.copilot import CallResult, SandboxViolation, call
 from rbot.handoff import check
 from rbot.pathways import IMPLEMENTED, PATHWAYS, PROMPTS_DIR
 from rbot.render import render
-from rbot.sources import SourceError, SourceText, write_source_text
+from rbot.sources import SourceError, SourceText, scrub, write_source_text
 
 ATTEMPTS = 3
 REQUIRED = (("run", "pathway"), ("run", "as_of"), ("identity", "issuer_name"))
@@ -26,17 +26,11 @@ VIOLATION = (
 
 
 UNSAFE_NAME = re.compile(r"[\x00-\x1f\x7f\[\]]")
-SURROGATES = re.compile("[\ud800-\udfff]")
 CITATION_RULE = (
     "Put each citation directly after its closing quote, before any other text: "
     '`"exact words" [file p.N]`. A citation at the end of the paragraph does not cover '
     "the quotes before it."
 )
-
-
-def scrub(text: str) -> str:
-    """Replace lone surrogates (valid in JSON, unencodable in UTF-8) with U+FFFD."""
-    return SURROGATES.sub("\ufffd", text)
 
 
 def module_of(err: BaseException) -> str:
@@ -56,6 +50,10 @@ class ModuleFailed(Exception):
 
 class ContextError(Exception):
     """context.json is unreadable or lacks a required key."""
+
+
+class OverlapError(ContextError):
+    """--out and the case folder contain one another: nothing may be written to either."""
 
 
 def load_context(case: Path) -> dict[str, Any]:
@@ -109,22 +107,40 @@ def _write_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _same_as_ancestor(path: Path, other: Path) -> bool:
+    """`other` is `path` or one of its ancestors by file identity (case-insensitive volumes)."""
+    return other.exists() and any(
+        p.exists() and os.path.samefile(p, other) for p in (path, *path.parents)
+    )
+
+
 def _refuse_overlap(case: Path, work: Path) -> None:
     """The source rebuild deletes work/sources and work/source-text: never near the case."""
     c, w = case.resolve(), work.resolve()
-    if c.is_relative_to(w) or w.is_relative_to(c):
-        raise ContextError("--out must be outside the case folder and the case outside --out")
+    if (
+        c.is_relative_to(w)
+        or w.is_relative_to(c)
+        or _same_as_ancestor(c, w)
+        or _same_as_ancestor(w, c)
+    ):
+        raise OverlapError("--out must be outside the case folder and the case outside --out")
 
 
-def stage_sources(case: Path, work: Path) -> None:
-    """Rebuild work/sources and work/source-text from the case; refuse unsafe entries."""
+def stage_sources(case: Path, work: Path) -> list[str]:
+    """Rebuild work/sources and work/source-text from the case; refuse unsafe entries.
+
+    Returns the names of the sub-folders it skipped."""
+    folders: list[str] = []
     for name in ("sources", "source-text"):
         if (work / name).exists():
             shutil.rmtree(work / name)
     (work / "sources").mkdir(parents=True)
     for path in sorted(case.iterdir()):
         name = path.name
-        if name == "context.json" or (path.is_dir() and not path.is_symlink()):
+        if path.is_dir() and not path.is_symlink():
+            folders.append(name)
+            continue
+        if name == "context.json":
             continue
         if path.is_symlink() or not path.is_file():
             raise SourceError(f"{name}: not a regular file (symlink or special file); remove it")
@@ -133,6 +149,7 @@ def stage_sources(case: Path, work: Path) -> None:
                 f"{name!r}: rename the file; names may not contain control characters or [ ]"
             )
         shutil.copyfile(path, work / "sources" / name)  # contents only: no mode is copied
+    return folders
 
 
 def _sha256(path: Path) -> str:
@@ -200,6 +217,7 @@ def _attempt(module: str, n: int, prompt: str, setup: Setup) -> tuple[str, list[
         "attempt": n,
         "requested_model": setup.settings["model"],
         "model": None,
+        "effort": setup.settings["effort"],
         "exit": None,
         "seconds": None,
         "credits": None,
@@ -234,7 +252,8 @@ def _attempt_once(
 NO_CITATION = "no citation right after it"
 NO_QUOTE = "Findings item with no verified quote"
 QUOTE_RULE = (
-    "Back every Findings item with at least one verbatim quote (12+ characters) and its citation."
+    "Back every Findings item with at least one verbatim quote (12+ characters) and its "
+    "citation, or move an unquoted conclusion to ## Next module."
 )
 NOT_FOUND = "quote not found on"
 GREP_RULE = (
@@ -251,6 +270,19 @@ def _accepted(handoff: Path, fp: Path, fingerprint: str, source_text: Path) -> b
     return not check(stored, source_text, quoted_findings=True)
 
 
+HANDOFF_INTRO = (
+    "Start from this handoff. Change only what the findings below name; keep everything else "
+    "word for word."
+)
+
+
+def _fenced(text: str) -> str:
+    """The text in a `~` fence longer than any line-leading `~~~~` run, so it cannot close early."""
+    runs = [len(m) for m in re.findall(r"^~{4,}", text, flags=re.M)]
+    fence = "~" * (max(runs) + 1 if runs else 4)
+    return f"{fence}markdown\n{text}\n{fence}"
+
+
 def _run_module(module: str, prompt: str, setup: Setup) -> None:
     work = setup.work
     fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
@@ -258,6 +290,7 @@ def _run_module(module: str, prompt: str, setup: Setup) -> None:
     if _accepted(handoff, fp, fingerprint, work / "source-text"):
         return
     findings: list[str] = []
+    text = ""
     for n in range(1, ATTEMPTS + 1):
         text_prompt = prompt
         if findings:
@@ -266,6 +299,7 @@ def _run_module(module: str, prompt: str, setup: Setup) -> None:
             rules += [GREP_RULE] * any(NOT_FOUND in f for f in findings)
             rule = "".join(f"\n{r}\n" for r in rules)
             text_prompt += (
+                f"\n\n## Your previous handoff\n\n{HANDOFF_INTRO}\n\n{_fenced(text)}"
                 "\n\n## Findings from your previous attempt\n\nFix every item and reply with the "
                 f"complete handoff again:{rule}\n" + "\n".join(f"- {f}" for f in findings)
             )
@@ -291,8 +325,11 @@ def run_case(
     settings = _model_settings()
     names = modules or [m for m in PATHWAYS[context["run"]["pathway"]] if m in IMPLEMENTED]
     work.mkdir(parents=True, exist_ok=True)
-    stage_sources(case, work)
+    folders = stage_sources(case, work)
     pages, skipped = write_source_text(work / "sources", work / "source-text")
+    skipped += folders
+    if skipped:
+        _log(work, skipped=skipped)
     setup, listing = Setup(work, gh, settings), source_listing(pages, skipped, work / "sources")
     for i, module in enumerate(names):
         upstream = [p for m in names[:i] if (p := work / "handoffs" / f"{m}.md").is_file()]

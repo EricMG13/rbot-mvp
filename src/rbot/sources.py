@@ -19,6 +19,14 @@ HTML_CHUNK = 3000
 TEXT_CHUNK = 12000
 
 
+SURROGATES = re.compile("[\ud800-\udfff]")
+
+
+def scrub(text: str) -> str:
+    """Replace lone surrogates (valid in JSON, unencodable in UTF-8) with U+FFFD."""
+    return SURROGATES.sub("\ufffd", text)
+
+
 class SourceError(Exception):
     """A source file cannot be read as text."""
 
@@ -117,6 +125,6 @@ def write_source_text(sources: Path, out: Path) -> tuple[list[SourceText], list[
             stale.unlink()
         for number, text in enumerate(pages, 1):
             with (folder / f"p{number:04d}.txt").open("w", encoding="utf-8", newline="\n") as f:
-                f.write(text)
+                f.write(scrub(text))
         done.append(SourceText(name=path.name, pages=len(pages)))
     return done, skipped

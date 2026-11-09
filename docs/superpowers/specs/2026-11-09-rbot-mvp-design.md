@@ -56,8 +56,8 @@ inbox/<pathway>/<case>/      user drops: sources + context.json [+ prior/]
 work/<pathway>/<case>/       claimed case
   sources/                   the user's files, untouched
   source-text/<source>/p0001.txt   one UTF-8 file per page
-  handoffs/<MODULE>.md       accepted handoffs
-  attempts/<MODULE>/<n>.{prompt.md,events.jsonl,handoff.md,findings.txt}
+  handoffs/<MODULE>.md       accepted handoffs (<MODULE>.fp beside each: prompt fingerprint)
+  attempts/<MODULE>/<n>/{prompt.md,events.jsonl,stderr.txt,handoff.md,findings.txt}
   calculation.json  forecast.json  <module>.json
   run.log
 outbox/<pathway>/<case>/     report.html, handoffs/, *.json, run.log, sources/ | FAILED.md

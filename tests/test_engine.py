@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from rbot import __main__ as cli
-from rbot import engine
+from rbot import engine, sources
 from rbot.copilot import CallResult, SandboxViolation
 from rbot.engine import ContextError, ModuleFailed, run_case
 from rbot.pathways import IMPLEMENTED, PATHWAYS, PROMPTS_DIR
@@ -589,7 +589,7 @@ def test_engine_requires_a_quote_in_every_findings_item(case: Case) -> None:
 
 @pytest.mark.parametrize("layout", ["case-is-out", "out-contains-case", "case-in-sources"])
 def test_out_overlapping_the_case_is_refused(
-    case: Case, monkeypatch: pytest.MonkeyPatch, layout: str
+    case: Case, monkeypatch: pytest.MonkeyPatch, layout: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     keep = case.case / "sources" / "notes.txt"
     keep.parent.mkdir()
@@ -604,7 +604,8 @@ def test_out_overlapping_the_case_is_refused(
         out = case.case
     monkeypatch.setattr(cli, "run_case", lambda c, o: run_case(c, o, gh=case.script(events(VALID))))
     assert cli.main(["run", str(target), "--out", str(out)]) == 1
-    assert "outside the case folder" in (out / "FAILED.md").read_text(encoding="utf-8")
+    assert "outside the case folder" in capsys.readouterr().err
+    assert not list(case.root.rglob("FAILED.md"))
     assert keep.read_text(encoding="utf-8") == "my notes"
     assert case.calls() == 0
 
@@ -665,5 +666,108 @@ def test_common_prompt_states_page_file_rule(case: Case) -> None:
 def test_cp0_prompt_puts_verdict_in_next_module(case: Case) -> None:
     run_case(case.case, case.work, gh=case.script(events(VALID)))
     prompt = " ".join(prompt_of(case).split())
-    assert "Do not put the verdict in Findings" in prompt
+    assert "Do not put the verdict, a sufficiency or adequacy conclusion" in prompt
     assert "first a line `Verdict:" in prompt
+
+
+def test_overlap_by_samefile_is_refused(case: Case) -> None:
+    twin = case.root / "CASE"
+    if not twin.exists():
+        pytest.skip("case-sensitive volume")
+    with pytest.raises(ContextError, match="outside the case folder"):
+        run_case(case.case, twin / "work", gh=case.script(events(VALID)))
+    assert case.calls() == 0
+
+
+def test_surrogate_in_page_text_is_replaced_not_a_traceback(
+    case: Case, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        sources, "extract_pages", lambda path: ["Acme Corp annual report \ud800FY2024"]
+    )
+    assert cli_with(monkeypatch, case, case.script(events(VALID))) == 0
+    page = case.work / "source-text" / "a.txt" / "p0001.txt"
+    assert page.read_text(encoding="utf-8") == "Acme Corp annual report \ufffdFY2024"
+
+
+def test_skipped_files_and_folders_are_logged(case: Case) -> None:
+    (case.case / "notes.docx").write_bytes(b"x")
+    (case.case / "prior").mkdir()
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+    (line,) = [e for e in case.log() if "skipped" in e]
+    assert line == {"ts": line["ts"], "skipped": ["notes.docx", "prior"]}
+
+
+def test_no_skipped_line_when_nothing_is_skipped(case: Case) -> None:
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+    assert not [e for e in case.log() if "skipped" in e]
+
+
+def test_attempt_log_carries_effort(case: Case, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RBOT_EFFORT", "high")
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+    assert case.log()[0]["effort"] == "high"
+
+
+def test_resume_reruns_a_stored_handoff_with_an_unquoted_finding(case: Case) -> None:
+    gh = case.script(events(VALID), events(VALID))
+    run_case(case.case, case.work, gh=gh)
+    stored = case.work / "handoffs" / "CP-0.md"
+    unquoted = VALID.replace("## Findings\n\n", "## Findings\n\nAn unquoted claim.\n\n")
+    stored.write_text(unquoted, encoding="utf-8")
+    run_case(case.case, case.work, gh=gh)
+    assert case.calls() == 2
+    assert stored.read_text(encoding="utf-8") == VALID
+
+
+def test_prompt_sends_conclusions_to_next_module(case: Case) -> None:
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+    prompt = " ".join(prompt_of(case).split())
+    assert "a sufficiency or adequacy conclusion" in prompt
+    assert "Conclusions without a quote belong in" in prompt
+
+
+def test_retry_header_offers_next_module_for_unquoted_conclusion(case: Case) -> None:
+    bare = VALID.replace(
+        'The issuer is "Acme Corp annual report" [a.txt p.1], as of 2025-03-31, FY2024.',
+        'The issuer is "Acme Corp annual report" [a.txt p.1].\n\n- The source set is adequate.',
+    )
+    run_case(case.case, case.work, gh=case.script(events(bare), events(VALID)))
+    retry = " ".join(prompt_of(case, n=2).split("## Findings from your previous")[1].split())
+    assert "move an unquoted conclusion to ## Next module" in retry
+
+
+def _uncited() -> str:
+    return VALID.replace(
+        '"Acme Corp annual report" [a.txt p.1]', 'He said "Acme Corp annual report" and left.'
+    )
+
+
+def test_retry_inlines_previous_handoff(case: Case) -> None:
+    first = _uncited()
+    run_case(case.case, case.work, gh=case.script(events(first), events(VALID)))
+    retry = prompt_of(case, n=2)
+    assert "## Your previous handoff" in retry
+    assert first in retry
+    assert "Change only what the findings below name" in retry
+    assert retry.index("## Your previous handoff") < retry.index(
+        "## Findings from your previous attempt"
+    )
+    assert "## Your previous handoff" not in prompt_of(case, n=1)
+
+
+def test_retry_fence_survives_tilde_lines(case: Case) -> None:
+    first = _uncited() + "\n~~~~\nstray\n"
+    run_case(case.case, case.work, gh=case.script(events(first), events(VALID)))
+    retry = prompt_of(case, n=2)
+    assert first in retry
+    assert "\n~~~~~markdown\n" in retry
+    assert "\n~~~~~\n" in retry
+
+
+def test_fingerprint_ignores_retry_content(case: Case) -> None:
+    gh = case.script(events(_uncited()), events(VALID))
+    run_case(case.case, case.work, gh=gh)
+    assert case.calls() == 2
+    run_case(case.case, case.work, gh=gh)
+    assert case.calls() == 2

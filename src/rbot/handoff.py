@@ -12,11 +12,18 @@ _QUOTE = re.compile(r"\"([^\"]*)\"|“([^”]*)”")
 _CITATION = re.compile(r"\s*\[([^\]]+?) p\.(\d+)\]")
 H2 = re.compile(r"^## (.+?)\s*$")
 FENCE = re.compile(r"^```\s*(\S*)\s*$")
-_TRANSLATE = str.maketrans("“”‘’–—", "\"\"''--")
+_TRANSLATE = str.maketrans("“”‘’–—‐‑−", "\"\"''-----", "\xad")
 _SPACED_DASH_WRAP = re.compile(r"(?<=\s)[–—]\s*\n\s*")
 _DASH_WRAP = re.compile(r"[–—]\s*\n\s*")
 _MARK = re.compile(r"[\"“”]")
 _MARK_CITED = re.compile(r"[\"”]\s*\[([^\]]+?) p\.(\d+)\]")
+# Delimiters checked only as cited spans: a closer right before `[file p.N]` is paired back to
+# the nearest opener in the paragraph. An uncited `’` is an apostrophe and never a finding.
+_CITED_ONLY = (("‘", "’"), ("«", "»"), ("＂", "＂"), ("„", "“"))
+_CITE_TAIL = r"\s*\[([^\]]+?) p\.(\d+)\]"
+BULLET = re.compile(r"[-*]\s+(.*)")
+NUMBER = re.compile(r"\d+[.)]\s+(.*)")
+HEADING = re.compile(r"(#{1,4})\s+(.*)")
 _PARAGRAPHS = re.compile(r"\n\s*\n")
 
 
@@ -26,6 +33,12 @@ def normalise(text: str, hyphen_wrap: str = "") -> str:
     text = _SPACED_DASH_WRAP.sub("- ", text)
     text = _DASH_WRAP.sub("-", text).translate(_TRANSLATE)
     return " ".join(text.split())
+
+
+def item_text(line: str) -> str | None:
+    """The text of a ``-`` or ``1.`` list item line, or None when the line is not an item."""
+    m = BULLET.match(line.strip()) or NUMBER.match(line.strip())
+    return m.group(1) if m else None
 
 
 def split_lines(text: str) -> list[str]:
@@ -139,10 +152,33 @@ def _quote_finding(
     return None
 
 
-def _paragraph_findings(
+def _blank(text: str, start: int, end: int) -> str:
+    """`text` with [start, end) replaced by spaces (newlines kept): same length, no marks."""
+    return text[:start] + re.sub(r"[^\n]", " ", text[start:end]) + text[end:]
+
+
+def _cited_only_spans(para: str) -> tuple[str, list[tuple[str, re.Match[str]]], list[str]]:
+    """Cited `‘…’`-style spans: (para with them blanked, [(quote, citation)], unpaired notes)."""
+    spans: list[tuple[str, re.Match[str]]] = []
+    unpaired: list[str] = []
+    for opener, closer in _CITED_ONLY:
+        floor = 0
+        for cm in re.finditer(re.escape(closer) + _CITE_TAIL, para):
+            start = para.rfind(opener, floor, cm.start())
+            quote = para[start + 1 : cm.start()] if start >= 0 else ""
+            if len(quote) >= 12:
+                spans.append((quote, cm))
+            else:
+                unpaired.append(f"cited quote could not be paired before [{cm[1]} p.{cm[2]}]")
+            if start >= 0:
+                floor = cm.start() + 1
+                para = _blank(para, start, floor)
+    return para, spans, unpaired
+
+
+def _double_quote_findings(
     para: str, source_text: Path, cache: dict[tuple[str, str], str | None]
 ) -> list[str]:
-    """Fail closed: an unpaired quote mark or an unverified cited mark is a finding."""
     out: list[str] = []
     spans: list[tuple[int, int]] = []
     verified: set[int] = set()
@@ -162,35 +198,57 @@ def _paragraph_findings(
     return out
 
 
-_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+def _paragraph_findings(
+    para: str, source_text: Path, cache: dict[tuple[str, str], str | None]
+) -> list[str]:
+    """Fail closed: an unpaired quote mark or an unverified cited mark is a finding."""
+    rest, extra, out = _cited_only_spans(para)
+    for quote, cm in extra:
+        finding = _quote_finding(quote, cm, source_text, cache)
+        out += [finding] if finding else []
+    return out + _double_quote_findings(rest, source_text, cache)
+
+
+def section_units(text: str, section: str) -> list[str]:
+    """Items and paragraphs of `## <section>` outside fences, split as the renderer splits them.
+
+    A `-`/`*`/`1.` line starts an item that only indented lines continue; a `#{1,4}` heading or a
+    blank line or a fence ends the unit; any other line continues a paragraph or starts one.
+    Each unit is its lines, stripped (item marker removed), joined by single spaces.
+    """
+    units: list[list[str]] = []
+    current: list[str] | None = None
+    is_item = False
+    in_section = False
+    for line, fenced, _ in _lines(text):
+        heading = None if fenced else H2.match(line)
+        if heading:
+            in_section, current = heading.group(1) == section, None
+        elif not in_section:
+            continue
+        elif fenced or not line.strip() or HEADING.match(line.strip()):
+            current = None
+        elif (item := item_text(line)) is not None:
+            current, is_item = [item.strip()], True
+            units.append(current)
+        elif current is not None and (not is_item or line.startswith((" ", "\t"))):
+            current.append(line.strip())
+        else:
+            current, is_item = [line.strip()], False
+            units.append(current)
+    return [" ".join(u) for u in units]
 
 
 def _findings_units(text: str) -> list[str]:
-    """Each list item and paragraph of ## Findings, outside fences, split as the renderer does."""
-    units: list[list[str]] = []
-    current: list[str] | None = None
-    section = ""
-    for line, fenced, _ in _lines(text):
-        if fenced:
-            continue
-        if heading := H2.match(line):
-            section, current = heading.group(1), None
-        elif section != "Findings":
-            continue
-        elif not line.strip() or line.lstrip().startswith("#"):
-            current = None
-        elif current is None or _ITEM.match(line):
-            current = [line.strip()]
-            units.append(current)
-        else:
-            current.append(line.strip())
-    return ["\n".join(u) for u in units]
+    return section_units(text, "Findings")
 
 
 def _unquoted_findings(text: str) -> list[str]:
     out = []
     for unit in _findings_units(text):
-        if not any(len(m.group(1) or m.group(2)) >= 12 for m in _QUOTE.finditer(unit)):
+        rest, extra, _ = _cited_only_spans(unit)
+        quotes = [q for q, _ in extra] + [m.group(1) or m.group(2) for m in _QUOTE.finditer(rest)]
+        if not any(len(q) >= 12 for q in quotes):
             out.append(f'Findings item with no verified quote: "{unit[:60]}"')
     return out
 
