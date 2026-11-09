@@ -1,0 +1,37 @@
+:root {
+  /* brand: structure and action, never a verdict */
+  --rb-navy: #000533;        --rb-blue: #0017E5;
+  --rb-blue-hover: #0012B8;  --rb-logo-field: #001AFF;
+  /* neutrals */
+  --rb-ground: #EEF0F5;  --rb-panel: #FFFFFF;  --rb-head: #F6F7FA;
+  --rb-rule: #DDE1EA;    --rb-rule-soft: #EEF0F5;  --rb-select: #E7ECFF;
+  --rb-ink: #000533;     --rb-ink-2: #4A5068;  --rb-ink-3: #9AA0B4;
+  --rb-on-navy: #FFFFFF; --rb-on-navy-2: #C7CBE0;
+  /* signal: meaning for the creditor; never alone */
+  --rb-pos: #0E7A46;  --rb-pos-tint: #DCF5E7;  --rb-pos-navy: #7EE2A8;
+  --rb-caut: #8A5300; --rb-caut-tint: #FFF1C7; --rb-caut-navy: #FFD166;
+  --rb-neg: #B3261E;  --rb-neg-tint: #FBE0DD;  --rb-neg-navy: #FFB4B0;
+  --rb-neu: #4A5068;  --rb-neu-tint: #EEF0F5;  --rb-neu-navy: #C7CBE0;
+  /* chart */
+  --rb-ch-1: #0017E5; /* issuer */   --rb-ch-2: #C4410C; /* comparison */
+  --rb-ch-3: #000533; --rb-ch-4: #4A5068; --rb-ch-5: #9AA0B4;
+  --rb-ch-grid: #DDE1EA; --rb-ch-track: #EEF0F5; --rb-ch-hatch: 45deg 2/6px;
+  /* type */
+  --rb-font-display: 'Red Hat Display', system-ui, sans-serif;
+  --rb-font-text: 'Red Hat Text', system-ui, sans-serif;
+  --rb-font-mono: 'Red Hat Mono', ui-monospace, monospace;
+  --rb-fs-page: 20px; --rb-fs-call: 16px; --rb-fs-issuer: 15px;
+  --rb-fs-body: 13.5px; --rb-fs-table: 12px; --rb-fs-label: 11px;
+  --rb-fs-micro: 10.5px; --rb-lh-body: 1.5; --rb-lh-table: 1.45;
+  /* space */
+  --rb-s-1: 4px; --rb-s-2: 6px; --rb-s-3: 8px; --rb-s-4: 10px;
+  --rb-s-5: 12px; --rb-s-6: 18px; --rb-s-7: 24px;
+  /* radius */
+  --rb-r-panel: 0; --rb-r-tag: 2px; --rb-r-tile: 3px; --rb-r-nav: 4px;
+  /* motion */
+  --rb-t-fast: 120ms; --rb-t-base: 180ms; --rb-t-slow: 260ms;
+  --rb-ease: cubic-bezier(.2,.7,.2,1);
+  /* layout */
+  --rb-rail: 56px; --rb-navigator: 236px; --rb-inspector: 300px;
+  --rb-call-min: 56px; --rb-target: 24px; --rb-focus: 2px solid var(--rb-blue);
+}
