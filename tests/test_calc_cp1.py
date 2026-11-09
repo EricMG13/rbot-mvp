@@ -106,13 +106,12 @@ def test_digits_not_in_quote_reported(tmp_path: Path) -> None:
     row = pages.row("cash_and_equivalents", "fy-2024", "6261")
     row["value"] = "6262"
     _, findings = compute(block([row]), pages.root)
-    assert len(findings) == 1 and "digits" in findings[0]
+    assert len(findings) == 1 and "not printed as one number" in findings[0]
 
 
 def test_digits_allow_parenthesised_negative(tmp_path: Path) -> None:
     pages = Pages(tmp_path)
-    row = pages.row("cfo", "fy-2024", "302")
-    row["value"] = "-302"
+    row = pages.row("cfo", "fy-2024", "-302", shown="(302)")
     calc, findings = compute(block([row]), pages.root)
     assert findings == []
     assert calc["inputs"]["fy-2024"]["cfo"] == "-302"
@@ -194,9 +193,9 @@ def test_zero_denominator_is_null_with_gap(tmp_path: Path) -> None:
     ratios = calc["ratios"]["fy-2024"]
     assert ratios["gross_leverage"] is None and ratios["net_leverage"] is None
     assert ratios["interest_cover"] is None
-    assert "fy-2024: gross_leverage not computed: zero denominator" in calc["gaps"]
-    assert "fy-2024: net_leverage not computed: zero denominator" in calc["gaps"]
-    assert "fy-2024: interest_cover not computed: zero denominator" in calc["gaps"]
+    assert "fy-2024: gross_leverage not computed: zero or negative denominator" in calc["gaps"]
+    assert "fy-2024: net_leverage not computed: zero or negative denominator" in calc["gaps"]
+    assert "fy-2024: interest_cover not computed: zero or negative denominator" in calc["gaps"]
 
 
 def test_rounding_half_even(tmp_path: Path) -> None:
@@ -284,13 +283,19 @@ def test_exact_findings_for_sourced_rows(tmp_path: Path) -> None:
     pages = Pages(tmp_path)
     good = pages.row("revenue", "fy-2024", "10")
     lab = "revenue fy-2024"
-    assert _findings([good | {"value": "11"}], pages) == [f"{lab}: digits '11' not found in quote"]
+    assert _findings([good | {"value": "11"}], pages) == [
+        f"{lab}: value '11' is not printed as one number in the quote"
+    ]
     assert _findings([good | {"value": 5}], pages) == [
         "number must be a string: block.rows[0].value = 5",
         f"{lab}: value must be a string",
     ]
-    assert _findings([good | {"value": "ten"}], pages) == [f"{lab}: value is not a number: 'ten'"]
-    assert _findings([good | {"value": "NaN"}], pages) == [f"{lab}: value is not finite: 'NaN'"]
+    assert _findings([good | {"value": "ten"}], pages) == [
+        f"{lab}: value is not a plain decimal of at most 15 significant digits: 'ten'"
+    ]
+    assert _findings([good | {"value": "NaN"}], pages) == [
+        f"{lab}: value is not a plain decimal of at most 15 significant digits: 'NaN'"
+    ]
     assert _findings([good | {"source": ""}], pages) == [
         f"{lab}: source must be a non-empty string"
     ]
@@ -347,17 +352,19 @@ def test_exact_findings_for_derived_rows(tmp_path: Path) -> None:
     assert _findings([row | {"derived": two_bad}], pages) == [
         "number must be a string: block.rows[0].derived[0] = 5",
         f"{lab} component 0: must be an object",
-        f"{lab} component 1: digits '11' not found in quote",
-        f"{lab} component 2: digits '21' not found in quote",
+        f"{lab} component 1: value '11' is not printed as one number in the quote",
+        f"{lab} component 2: value '21' is not printed as one number in the quote",
     ]
     assert _findings([row | {"value": "31"}], pages) == [
         f"{lab}: value 31 is not the sum of its components"
     ]
-    assert _findings([row | {"value": "x"}], pages) == [f"{lab}: value is not a number: 'x'"]
+    assert _findings([row | {"value": "x"}], pages) == [
+        f"{lab}: value is not a plain decimal of at most 15 significant digits: 'x'"
+    ]
     bad_both = [parts[0] | {"value": "11"}, parts[1]]
     assert _findings([row | {"derived": bad_both, "value": "x"}], pages) == [
-        f"{lab} component 0: digits '11' not found in quote",
-        f"{lab}: value is not a number: 'x'",
+        f"{lab} component 0: value '11' is not printed as one number in the quote",
+        f"{lab}: value is not a plain decimal of at most 15 significant digits: 'x'",
     ]
 
 
@@ -381,11 +388,18 @@ def test_exact_findings_for_rows_and_block(tmp_path: Path) -> None:
         "number must be a string: block.rows = 5",
         "block.rows must be a list",
     ]
-    empty: dict[str, Any] = {"periods": [], "inputs": {}, "ratios": {}, "gaps": []}
+    empty: dict[str, Any] = {
+        "currency": None,
+        "unit": None,
+        "periods": [],
+        "inputs": {},
+        "ratios": {},
+        "gaps": [],
+    }
     assert compute(None, pages.root) == (empty, ["block must be a JSON object"])
     for periods in ([], [5], [""], "fy"):
         calc, findings = compute(block([]) | {"periods": periods}, pages.root)
-        assert calc == empty
+        assert calc == empty | {"currency": "USD", "unit": "m"}
         assert findings[-1] == "block.periods must be a non-empty list of strings"
     for key in ("currency", "unit"):
         _, findings = compute(block([]) | {key: 5}, pages.root)
@@ -404,17 +418,25 @@ def test_rounding_mode_is_explicit(tmp_path: Path) -> None:
     assert calc["ratios"]["fy-2024"]["gross_leverage"] == "0.0312"
 
 
-def test_decimal_text_is_plain_not_exponent(tmp_path: Path) -> None:
+def test_exponent_and_odd_values_rejected(tmp_path: Path) -> None:
     pages = Pages(tmp_path)
-    rows = [
-        pages.row("cash_and_equivalents", "fy-2024", "1E3", shown="1E3"),
-        pages.row("rcf_commitment", "fy-2024", "1E3", shown="1E3"),
-        pages.row("rcf_drawn", "fy-2024", "1E3", shown="1E3"),
-    ]
-    calc, findings = compute(block(rows, ["fy-2024"]), pages.root)
-    assert findings == []
-    assert calc["inputs"]["fy-2024"]["cash_and_equivalents"] == "1000"
-    assert calc["ratios"]["fy-2024"]["liquidity"] == "1000"
+    for bad in (
+        "1E3",
+        "１２",
+        "1,000",
+        "+5",
+        "1.",
+        ".5",
+        "",
+        "1234567890123456",
+        "0.1234567890123456",
+    ):
+        row = pages.row("revenue", "fy-2024", "5") | {"value": bad}
+        calc, findings = compute(block([row], ["fy-2024"]), pages.root)
+        assert findings, bad
+        assert "revenue" not in calc["inputs"]["fy-2024"], bad
+    row = pages.row("revenue", "fy-2024", "123456789012345")
+    assert compute(block([row], ["fy-2024"]), pages.root)[1] == []
 
 
 def test_liquidity_gap_names_each_missing_operand(tmp_path: Path) -> None:
@@ -427,7 +449,347 @@ def test_liquidity_gap_names_each_missing_operand(tmp_path: Path) -> None:
         assert f"fy-2024: liquidity not computed: missing {gone}" in calc["gaps"]
 
 
+def put(pages: Pages, text: str) -> int:
+    """Write `text` as the next page and return its number."""
+    pages.n += 1
+    (pages.root / SRC / f"p{pages.n:04d}.txt").write_text(
+        text + "\n", encoding="utf-8", newline="\n"
+    )
+    return pages.n
+
+
+def one(pages: Pages, field: str, value: str, text: str, quote: str) -> tuple[Any, list[str]]:
+    n = put(pages, text)
+    row = {"field": field, "period": "fy-2024", "value": value, "source": SRC, "page": n}
+    return compute(block([row | {"quote": quote}], ["fy-2024"]), pages.root)
+
+
+def test_value_must_be_one_whole_number_token(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    wrong = [
+        ("rcf_drawn", "0", "As of December 31, 2024, borrowed $1,250 million under the RCF"),
+        ("cash_and_equivalents", "6261", "Cash and cash equivalents were $16,261 million"),
+        ("cash_and_equivalents", "6261", "Cash and cash equivalents were $6,261.5 million"),
+        ("revenue", "25", "Total revenue of $2,500 million for fiscal 2024"),
+        ("interest_expense_net", "8611", "Interest expense, net 1,286 1,164 for two years"),
+        ("revenue", "5", "Total revenue of $0.5 million in fiscal 2024 only"),
+        ("revenue", "0", "Total revenue of 10-K filers in fiscal 2024 only"),
+    ]
+    for field, value, text in wrong:
+        calc, findings = one(pages, field, value, text, text)
+        assert findings == [
+            f"{field} fy-2024: value {value!r} is not printed as one number in the quote"
+        ], text
+        assert calc["inputs"]["fy-2024"] == {}
+
+
+def test_value_matches_formatted_token_and_nil_marker(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    right = [
+        ("cash_and_equivalents", "6261", "Cash and cash equivalents were $6,261 million", "6261"),
+        (
+            "cash_and_equivalents",
+            "6261.5",
+            "Cash and cash equivalents were 6,261.5 million",
+            "6261.5",
+        ),
+        ("rcf_drawn", "0", "Revolver borrowings outstanding \u2014 at year end", "0"),
+        ("rcf_drawn", "0", "Revolver borrowings outstanding \u2013 at year end", "0"),
+        ("rcf_drawn", "0", "Revolver borrowings outstanding - at year end", "0"),
+        ("rcf_drawn", "0", "Revolver borrowings outstanding 0 at year end", "0"),
+        ("rcf_drawn", "0", "Revolver borrowings outstanding \u2014", "0"),
+    ]
+    for field, value, text, want in right:
+        calc, findings = one(pages, field, value, text, text)
+        assert findings == [], text
+        assert calc["inputs"]["fy-2024"][field] == want
+    bad = "Revolver borrowings outstanding a-b at year end"
+    assert one(pages, "rcf_drawn", "0", bad, bad)[1]
+    bad = "Revolver borrowings outstanding \u2014x at year end"
+    assert one(pages, "rcf_drawn", "0", bad, bad)[1]
+    bad = "Revolver borrowings outstanding x\u2014 at year end"
+    assert one(pages, "rcf_drawn", "0", bad, bad)[1]
+
+
+def test_sign_must_be_printed(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    plain = "Interest expense, net 1,286 for the year"
+    calc, findings = one(pages, "interest_expense_net", "-1286", plain, plain)
+    assert findings and calc["inputs"]["fy-2024"] == {}
+    for printed in ("(1,286)", "-1,286", "\u22121,286", "($1,286)", "-$1,286", "$(1,286)"):
+        text = f"Interest expense, net {printed} for the year"
+        calc, findings = one(pages, "interest_expense_net", "-1286", text, text)
+        assert findings == [], printed
+        assert calc["inputs"]["fy-2024"]["interest_expense_net"] == "-1286"
+    for printed in ("(1,286)", "1,286"):  # a positive value may match a parenthesised figure
+        text = f"Interest expense, net {printed} for the year"
+        assert one(pages, "interest_expense_net", "1286", text, text)[1] == []
+    for text in (
+        "Interest 2023-1,286 for the year",
+        "Interest expense, net - 1,286 for the year",
+        "Interest expense, net (1,286 for the year",
+        "Interest expense, net 1,286) for the year",
+    ):
+        assert one(pages, "interest_expense_net", "-1286", text, text)[1], text
+
+
+def test_balance_fields_must_not_be_negative(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    for field in (
+        "total_debt",
+        "senior_secured_debt",
+        "cash_and_equivalents",
+        "rcf_commitment",
+        "rcf_drawn",
+        "maturity_2027",
+    ):
+        text = f"Amount shown for the item (487) at year end for {field}"
+        calc, findings = one(pages, field, "-487", text, text)
+        assert findings == [f"{field} fy-2024: {field} must not be negative: -487"]
+        assert calc["inputs"]["fy-2024"] == {}
+    for field in ("cfo", "capex", "revenue", "ebitda"):
+        text = f"Amount shown for the item (487) at year end for {field}"
+        assert one(pages, field, "-487", text, text)[1] == []
+
+
+def test_derived_cancelling_components_rejected(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    n = put(pages, "Total debt 24,581 and current portion 487 at year end")
+    q = "Total debt 24,581 and current portion 487"
+    parts = [{"value": v, "source": SRC, "page": n, "quote": q} for v in ("487", "-487")]
+    row = {"field": "total_debt", "period": "fy-2024", "value": "0", "derived": parts}
+    calc, findings = compute(block([row], ["fy-2024"]), pages.root)
+    assert findings and calc["inputs"]["fy-2024"] == {}
+
+
+def test_nonpositive_denominators_give_null_and_gap(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    rows = [
+        pages.row("total_debt", "fy-2024", "300"),
+        pages.row("cash_and_equivalents", "fy-2024", "50"),
+        pages.row("adjusted_ebitda", "fy-2024", "-150", shown="(150)"),
+        pages.row("interest_expense_net", "fy-2024", "-40", shown="(40)"),
+    ]
+    calc, findings = compute(block(rows, ["fy-2024"]), pages.root)
+    assert findings == []
+    r = calc["ratios"]["fy-2024"]
+    assert (r["gross_leverage"], r["net_leverage"], r["interest_cover"]) == (None, None, None)
+    for name in ("gross_leverage", "net_leverage", "interest_cover"):
+        assert f"fy-2024: {name} not computed: zero or negative denominator" in calc["gaps"]
+
+
+def test_compute_never_raises(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    good = pages.row("revenue", "fy-2024", "10")
+    odd: list[dict[str, Any]] = [
+        good | {"period": ["fy-2024"]},
+        good | {"period": {"a": "b"}},
+        good | {"field": ["revenue"]},
+        good | {"field": {"a": 1}},
+        good | {"source": ["x"]},
+        good | {"quote": {"q": 1}},
+        good | {"value": "9" * 40},
+        good | {"value": "1E999999"},
+    ]
+    for row in odd:
+        calc, findings = compute(block([row], ["fy-2024"]), pages.root)
+        assert findings and calc["inputs"]["fy-2024"] == {}
+    deep: Any = []
+    for _ in range(1500):
+        deep = [deep]
+    calc, findings = compute(block([good]) | {"note": deep}, pages.root)
+    assert [f for f in findings if f.startswith("nesting deeper than 20 levels at block.note")]
+    nested: Any = "x"
+    for _ in range(21):
+        nested = {"k": nested}
+    assert compute(block([good | {"deep": nested}]), pages.root)[1] == [
+        "nesting deeper than 20 levels at block.rows[0].deep" + ".k" * 18
+    ]
+    shallow: Any = "x"
+    for _ in range(15):
+        shallow = {"k": shallow}
+    assert compute(block([good | {"deep": shallow}], ["fy-2024"]), pages.root)[1] == []
+
+
+def test_extreme_values_stay_in_decimal_context(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    big, tiny = "999999999999999", "0.000000000000001"
+    rows = [pages.row("total_debt", "fy-2024", big), pages.row("ebitda", "fy-2024", tiny)]
+    calc, findings = compute(block(rows, ["fy-2024"]), pages.root)
+    assert findings == []
+    assert calc["ratios"]["fy-2024"]["gross_leverage"] == "999999999999999000000000000000.0000"
+
+
+def test_quote_minimum_is_measured_after_normalise(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    page = "As of December 31, 2024, borrowings of $1,250 million were outstanding. Cash 16,261."
+    for field, value, quote in (
+        ("rcf_drawn", "0", "0" + " " * 11),
+        ("cash_and_equivalents", "6261", "6,261" + " " * 7),
+        ("rcf_drawn", "1250", "1,250" + "-\n" * 4),
+    ):
+        calc, findings = one(pages, field, value, page, quote)
+        assert findings == [f"{field} fy-2024: quote must be a string of at least 12 characters"]
+        assert calc["inputs"]["fy-2024"] == {}
+
+
+def test_derived_repeated_citation_rejected(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    n = put(pages, "Total debt 24,581 and current portion 487 at year end.")
+    part = {
+        "value": "24581",
+        "source": SRC,
+        "page": n,
+        "quote": "Total debt 24,581 and current portion 487",
+    }
+    row = {
+        "field": "total_debt",
+        "period": "fy-2024",
+        "value": "49162",
+        "derived": [part, dict(part, quote=str(part["quote"]) + "  ")],
+    }
+    calc, findings = compute(block([row], ["fy-2024"]), pages.root)
+    assert findings == ["total_debt fy-2024 component 1: repeats the citation of component 0"]
+    assert calc["inputs"]["fy-2024"] == {}
+    other = dict(part, value="487", quote="Total debt 24,581 and current portion 487 at")
+    row["derived"] = [part, other]
+    row["value"] = "25068"
+    assert compute(block([row], ["fy-2024"]), pages.root)[1] == []
+
+
+def test_conflicting_duplicates_drop_the_field(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    a = pages.row("adjusted_ebitda", "fy-2024", "4173")
+    b = pages.row("adjusted_ebitda", "fy-2024", "4000")
+    debt = pages.row("total_debt", "fy-2024", "25068")
+    calc, findings = compute(block([a, b, debt], ["fy-2024"]), pages.root)
+    assert findings == ["adjusted_ebitda fy-2024: duplicate row"]
+    assert calc["inputs"]["fy-2024"] == {"total_debt": "25068"}
+    assert calc["ratios"]["fy-2024"]["gross_leverage"] is None
+    assert calc["gaps"][0] == "fy-2024: adjusted_ebitda dropped: conflicting duplicate rows"
+    calc, findings = compute(block([a, a], ["fy-2024"]), pages.root)
+    assert findings == ["adjusted_ebitda fy-2024: duplicate row"]
+    assert calc["inputs"]["fy-2024"] == {"adjusted_ebitda": "4173"}
+    assert not any("dropped" in g for g in calc["gaps"])
+    bad = dict(b, value="9999")
+    calc, _ = compute(block([a, bad], ["fy-2024"]), pages.root)
+    assert "adjusted_ebitda" not in calc["inputs"]["fy-2024"]
+
+
+def test_maturity_field_needs_ascii_digits(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    for field in ("maturity_\uff12\uff10\uff12\uff17", "maturity_\u0662\u0660\u0662\u0667"):
+        calc, findings = compute(block([pages.row(field, "fy-2024", "700")]), pages.root)
+        assert findings == [f"rows[0]: unknown or missing field: {field!r}"]
+        assert calc["inputs"]["fy-2024"] == {}
+
+
+def test_row_with_a_finding_contributes_nothing(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    row = pages.row("adjusted_ebitda", "fy-2024", "4173") | {"confidence": Decimal("0.9")}
+    calc, findings = compute(block([row], ["fy-2024"]), pages.root)
+    assert findings == ["number must be a string: block.rows[0].confidence = 0.9"]
+    assert calc["inputs"]["fy-2024"] == {}
+    assert calc["ratios"]["fy-2024"]["basis"] is None
+
+
+def nest_dicts(layers: int) -> Any:
+    node: Any = "x"
+    for _ in range(layers):
+        node = {"k": node}
+    return node
+
+
+def nest_lists(layers: int) -> Any:
+    node: Any = "x"
+    for _ in range(layers):
+        node = [node]
+    return node
+
+
+def test_depth_bound_boundaries(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    good = pages.row("revenue", "fy-2024", "10")
+    assert compute(block([good | {"d": nest_dicts(18)}], ["fy-2024"]), pages.root)[1] == []
+    assert compute(block([good | {"d": nest_dicts(19)}], ["fy-2024"]), pages.root)[1] == [
+        "nesting deeper than 20 levels at block.rows[0].d" + ".k" * 18
+    ]
+    assert compute(block([nest_lists(19)], ["fy-2024"]), pages.root)[1] == [
+        "rows[0] must be an object"
+    ]
+    assert compute(block([nest_lists(20)], ["fy-2024"]), pages.root)[1] == [
+        "nesting deeper than 20 levels at block.rows[0]" + "[0]" * 19,
+        "rows[0] must be an object",
+    ]
+    assert compute(block([good]) | {"d": nest_dicts(20)}, pages.root)[1] == []
+    assert compute(block([good]) | {"d": nest_dicts(21)}, pages.root)[1] == [
+        "nesting deeper than 20 levels at block.d" + ".k" * 20
+    ]
+
+
+def test_row_findings_accumulate(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    good = pages.row("revenue", "fy-2024", "10")
+    out = compute(block([good | {"period": "zz"}, 5, "text", ["a"]], ["fy-2024"]), pages.root)[1]
+    assert out == [
+        "revenue zz: period is not in periods",
+        "number must be a string: block.rows[1] = 5",
+        "rows[1] must be an object",
+        "rows[2] must be an object",
+        "rows[3] must be an object",
+    ]
+    bad = good | {"value": "11"}
+    calc, findings = compute(block([bad, good], ["fy-2024"]), pages.root)
+    assert findings[-1] == "revenue fy-2024: duplicate row"
+    assert len(findings) == 2
+    assert calc["inputs"]["fy-2024"] == {}
+
+
+def test_citation_repeat_needs_same_source_page_and_quote(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    n = put(pages, "Total debt 24,581 and current portion 487 at year end.")
+    q = "Total debt 24,581 and current portion 487"
+    part = {"value": "24581", "source": SRC, "page": n, "quote": q}
+    lab = "total_debt fy-2024"
+
+    def run(second: dict[str, Any]) -> list[str]:
+        row = {"field": "total_debt", "period": "fy-2024", "value": "49162"}
+        return compute(block([row | {"derived": [part, second]}], ["fy-2024"]), pages.root)[1]
+
+    assert run(dict(part, source="y.htm")) != []
+    assert not any("repeats" in f for f in run(dict(part, source="y.htm")))
+    assert not any("repeats" in f for f in run(dict(part, page=n + 1)))
+    assert any("repeats" in f for f in run(dict(part)))
+    five, six = dict(part, quote=5), dict(part, quote=6)
+    row = {"field": "total_debt", "period": "fy-2024", "value": "1", "derived": [five, six]}
+    out = compute(block([row], ["fy-2024"]), pages.root)[1]
+    assert not any("repeats" in f for f in out) and out
+    row["derived"] = [five, dict(five)]
+    out = compute(block([row], ["fy-2024"]), pages.root)[1]
+    assert f"{lab} component 1: repeats the citation of component 0" in out
+
+
+def test_non_dict_block_still_reports_numbers(tmp_path: Path) -> None:
+    calc, findings = compute(Decimal("1.5"), tmp_path)
+    assert findings == ["number must be a string: block = 1.5", "block must be a JSON object"]
+    assert calc["currency"] is None and calc["unit"] is None
+
+
+def test_tiny_amounts_print_plain(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    rows = [
+        pages.row("cash_and_equivalents", "fy-2024", "0.0000001"),
+        pages.row("rcf_commitment", "fy-2024", "0"),
+        pages.row("rcf_drawn", "fy-2024", "0"),
+    ]
+    calc, findings = compute(block(rows, ["fy-2024"]), pages.root)
+    assert findings == []
+    assert calc["inputs"]["fy-2024"]["cash_and_equivalents"] == "0.0000001"
+    assert calc["ratios"]["fy-2024"]["liquidity"] == "0.0000001"
+
+
 pos = st.decimals(min_value=Decimal("0.01"), max_value=Decimal("1e9"), places=2)
+nonneg = st.decimals(min_value=Decimal("0"), max_value=Decimal("1e9"), places=2)
 
 
 def _calc_from_values(debt: Decimal, cash: Decimal, ebitda: Decimal) -> dict[str, Any]:
@@ -443,7 +805,7 @@ def _calc_from_values(debt: Decimal, cash: Decimal, ebitda: Decimal) -> dict[str
     return calc
 
 
-@given(debt=pos, cash=pos, ebitda=pos)
+@given(debt=pos, cash=nonneg, ebitda=pos)
 def test_property_net_not_above_gross(debt: Decimal, cash: Decimal, ebitda: Decimal) -> None:
     r = _calc_from_values(debt, cash, ebitda)["ratios"]["p"]
     assert Decimal(r["net_leverage"]) <= Decimal(r["gross_leverage"])
