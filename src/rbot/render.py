@@ -3,12 +3,12 @@
 import base64
 import os
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rbot.handoff import FENCE, H2, split_lines
-from rbot.markdown import esc, inline, item_text, to_html
+from rbot.handoff import section_units
+from rbot.markdown import esc, inline, to_html
 
 ASSETS = Path(__file__).parent / "assets"
 DASH = "—"
@@ -102,41 +102,9 @@ def _cover(context: Mapping[str, object], modules: Sequence[str]) -> str:
     )
 
 
-def _gaps_lines(md: str) -> Iterator[str]:
-    """Lines of the ``## Gaps`` section outside code fences, split as the checker splits."""
-    in_gaps = in_fence = False
-    for line in split_lines(md):
-        if FENCE.match(line):
-            in_fence = not in_fence
-        elif in_fence:
-            continue
-        elif heading := H2.match(line):
-            in_gaps = heading.group(1) == "Gaps"
-        elif in_gaps:
-            yield line
-
-
 def _gap_items(md: str) -> list[str]:
-    """Gap items: list items (with continuation lines, as markdown._list) and paragraph runs."""
-    items: list[list[str]] = []
-    open_item = False  # the last item is a list item, which indented lines continue
-    for line in _gaps_lines(md):
-        text = item_text(line)
-        if not line.strip() or line.lstrip().startswith("#"):
-            open_item = False
-            items.append([])
-        elif text is not None:
-            items.append([text.strip()])
-            open_item = True
-        elif items and items[-1] and (not open_item or line.startswith((" ", "\t"))):
-            items[-1].append(line.strip())
-        else:
-            items.append([line.strip()])
-            open_item = False
-    joined = [" ".join(parts) for parts in items if parts]
-    if len(joined) == 1 and _NO_GAPS.fullmatch(joined[0]):
-        return []
-    return joined
+    """Gap items: the shared units of ``## Gaps`` minus the "none" placeholders."""
+    return [u for u in section_units(md, "Gaps") if not _NO_GAPS.fullmatch(u)]
 
 
 def _sources(work: Path) -> str:

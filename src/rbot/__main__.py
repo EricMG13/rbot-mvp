@@ -7,8 +7,8 @@ from pathlib import Path
 
 from rbot import __version__
 from rbot.copilot import CopilotError, SandboxViolation
-from rbot.engine import ContextError, ModuleFailed, module_of, run_case, scrub
-from rbot.sources import SourceError
+from rbot.engine import ContextError, ModuleFailed, OverlapError, module_of, run_case
+from rbot.sources import SourceError, scrub
 
 LATCHED = "sandbox violation recorded \u2014 inspect work/, then delete FAILED.md to rerun"
 RESUME = "rerun the same command to resume"
@@ -45,6 +45,8 @@ def _run(case: Path, out: Path) -> int:
         return 1
     try:
         run_case(case, out)
+    except OverlapError as err:  # nothing may be written to --out or the case
+        print(f"rbot: {err}", file=sys.stderr)
     except ModuleFailed as err:
         _failed(out, err.module, str(err), err.findings, RESUME)
     except (CopilotError, SourceError, ContextError, OSError) as err:

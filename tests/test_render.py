@@ -204,3 +204,13 @@ def test_fonts_inlined(work: Path) -> None:
     out = html_of(work)
     assert out.count("@font-face") == 4
     assert "font/woff2;base64," in out
+
+
+def test_gaps_drop_a_none_item_among_others(work: Path) -> None:
+    out = gaps_of(work, "- real gap\n- None.")
+    assert "real gap" in out and "None." not in out
+
+
+def test_gaps_use_the_shared_unit_grammar(work: Path) -> None:
+    out = gaps_of(work, "- item\nlazy paragraph\n\n#1 risk")
+    assert "item</li>" in out and "lazy paragraph</li>" in out and "#1 risk</li>" in out
