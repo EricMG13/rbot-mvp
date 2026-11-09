@@ -113,3 +113,41 @@ def test_require_json_findings(tmp_path: Path) -> None:
 @given(st.text())
 def test_normalise_idempotent(s: str) -> None:
     assert normalise(normalise(s)) == normalise(s)
+
+
+def test_short_straight_quoted_terms_keep_pairing(tmp_path: Path) -> None:
+    prose = 'The "EBITDA" figure is the company\'s headline measure, unlike "Net sales" or "EPS".'
+    assert check(doc(prose), tmp_path) == []
+
+
+def test_fenced_json_strings_not_scanned_as_quotes(tmp_path: Path) -> None:
+    calc = '```json\n{"metric": "EBITDA As Defined margin", "m": 52.6}\n```'
+    assert check(doc("f", calc), tmp_path, require_json=True) == []
+
+
+def test_inner_curly_quotes_in_straight_quote(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0043="See “Non-GAAP Financial Measures” in this discussion.")
+    ok = doc('"See “Non-GAAP Financial Measures” in this discussion." [x.htm p.43]')
+    assert check(ok, root) == []
+
+
+def test_dash_and_hyphen_wraps(tmp_path: Path) -> None:
+    root = pages(
+        tmp_path,
+        p0001="Reports non-\nGAAP measures. Total Company—\nNet Sales rose. A well-\nknown fact.",
+    )
+    for q in (
+        "Reports non-GAAP measures.",
+        "Total Company—Net Sales rose.",
+        "A well-known fact.",
+        "A wellknown fact.",
+    ):
+        assert check(doc(f'"{q}" [x.htm p.1]'), root) == []
+    assert check(doc('"A well known fact." [x.htm p.1]'), root)
+
+
+def test_blank_quote_and_deep_json(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0001="anything")
+    assert "empty" in check(doc('"              " [x.htm p.1]'), root)[0]
+    deep = "```json\n" + "[" * 100000 + "]" * 100000 + "\n```"
+    assert check(doc("f", deep), tmp_path, require_json=True)

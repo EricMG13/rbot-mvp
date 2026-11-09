@@ -8,16 +8,19 @@ from collections.abc import Iterator
 from pathlib import Path
 
 SECTIONS = ("Request", "Sources", "Findings", "Calculations", "Gaps", "Next module")
-_QUOTE_CITED = re.compile(r"[“\"]([^”\"]{12,})[”\"]\s*\[([^\]]+?) p\.(\d+)\]")
-_QUOTE_ANY = re.compile(r"[“\"]([^”\"]{12,})[”\"]")
+_QUOTE = re.compile(r"\"([^\"]*)\"|“([^”]*)”")
+_CITATION = re.compile(r"\s*\[([^\]]+?) p\.(\d+)\]")
 _H2 = re.compile(r"^## (.+?)\s*$")
 _FENCE = re.compile(r"^```\s*(\S*)\s*$")
 _TRANSLATE = str.maketrans("“”‘’–—", "\"\"''--")
+_DASH_WRAP = re.compile(r"[–—]\s*\n\s*")
 
 
-def normalise(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text).translate(_TRANSLATE)
-    return " ".join(text.replace("-\n", "").split())
+def normalise(text: str, hyphen_wrap: str = "") -> str:
+    """Canonical form; `hyphen_wrap` replaces an ASCII `-\\n` (removed, or kept as `-`)."""
+    text = unicodedata.normalize("NFKC", text).replace("-\n", hyphen_wrap)
+    text = _DASH_WRAP.sub("-", text).translate(_TRANSLATE)
+    return " ".join(text.split())
 
 
 def _lines(text: str) -> Iterator[tuple[str, bool, str]]:
@@ -71,8 +74,11 @@ def _parse(text: str) -> tuple[object | None, str | None]:
         return None, f"expected exactly one json block in ## Calculations, found {len(blocks)}"
     try:
         return json.loads(blocks[0], parse_float=decimal.Decimal, parse_constant=_refuse), None
-    except ValueError as exc:
-        return None, f"json block in ## Calculations does not parse: {exc}"
+    except (ValueError, RecursionError) as exc:
+        return (
+            None,
+            f"json block in ## Calculations does not parse: {exc.__class__.__name__}: {exc}",
+        )
 
 
 def json_block(text: str) -> object | None:
@@ -94,23 +100,42 @@ def _missing(source_text: Path, name: str) -> str:
     return "page not found on" if safe and (source_text / name).is_dir() else "unknown source"
 
 
+def _prose(text: str) -> str:
+    """The text outside fenced code, where quotations are looked for."""
+    return "\n".join(line for line, fenced, _ in _lines(text) if not fenced)
+
+
+def _quote_finding(
+    m: re.Match[str], prose: str, source_text: Path, cache: dict[tuple[str, str], str | None]
+) -> str | None:
+    quote = m.group(1) if m.group(1) is not None else m.group(2)
+    if len(quote) < 12:
+        return None
+    shown = quote[:60]
+    cite = _CITATION.match(prose, m.end())
+    if not cite:
+        return f'quote with no citation right after it: "{shown}"'
+    name, number = cite.groups()
+    where = f"{name} p.{number}"
+    if (name, number) not in cache:
+        cache[name, number] = _page(source_text, name, number)
+    page = cache[name, number]
+    if page is None:
+        return f'{_missing(source_text, name)} {where}: "{shown}"'
+    wanted = normalise(quote)
+    if not wanted:
+        return f'empty quote on {where}: "{shown}"'
+    if not any(wanted in normalise(page, wrap) for wrap in ("", "-")):
+        return f'quote not found on {where}: "{shown}"'
+    return None
+
+
 def check(text: str, source_text: Path, *, require_json: bool = False) -> list[str]:
     out = _section_findings(text)
+    prose = _prose(text)
     cache: dict[tuple[str, str], str | None] = {}
-    for m in _QUOTE_CITED.finditer(text):
-        quote, name, number = m.groups()
-        key = (name, number)
-        if key not in cache:
-            cache[key] = _page(source_text, name, number)
-        page = cache[key]
-        where = f"{name} p.{number}"
-        shown = quote[:60]
-        if page is None:
-            out.append(f'{_missing(source_text, name)} {where}: "{shown}"')
-        elif normalise(quote) not in normalise(page):
-            out.append(f'quote not found on {where}: "{shown}"')
-    for m in _QUOTE_ANY.finditer(_QUOTE_CITED.sub(" ", text)):
-        out.append(f'quote with no citation right after it: "{m.group(1)[:60]}"')
+    found = (_quote_finding(m, prose, source_text, cache) for m in _QUOTE.finditer(prose))
+    out += [f for f in found if f]
     if require_json and (err := _parse(text)[1]):
         out.append(err)
     return out
