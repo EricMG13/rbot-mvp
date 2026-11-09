@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 from rbot.calc.cp1 import FIELDS
 from rbot.calc.cp1 import compute as _compute
 from rbot.handoff import verify_quote
+from rbot.html_text import convert_html
 
 ORACLE = json.loads(Path("tests/oracles/tdg-fy2024-cp1.json").read_text(encoding="utf-8"))
 SRC = "x.htm"
@@ -321,7 +322,7 @@ def test_value_whitespace_ignored_in_digit_check(tmp_path: Path) -> None:
 
 def test_quote_length_boundary(tmp_path: Path) -> None:
     pages = Pages(tmp_path)
-    (pages.root / SRC / "p0001.txt").write_text("Revenue is 10 m.", encoding="utf-8", newline="\n")
+    (pages.root / SRC / "p0001.txt").write_text("Revenue is 1 m.", encoding="utf-8", newline="\n")
     row = {"field": "revenue", "period": "fy-2024", "value": "1", "source": SRC, "page": 1}
     assert _findings([row | {"quote": "Revenue is 1"}], pages) == []
     assert _findings([row | {"quote": "Revenue is "}], pages) == [
@@ -875,6 +876,104 @@ def test_derived_repeat_is_keyed_on_source_page_and_value(tmp_path: Path) -> Non
     assert run([a, b], "49162") == [f"{lab} component 1: repeats the citation of component 0"]
     other = dict(b, value="487", quote="current portion 487 at year end")
     assert run([a, other], "25068") == []
+
+
+def rejected(field: str, value: str) -> list[str]:
+    return [f"{field} fy-2024: value {value!r} is not printed as one number in the quote"]
+
+
+def test_split_cell_parentheses_read_negative(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    html = b"<table><tr><td>Adjusted EBITDA</td><td>$</td><td>(4,173</td><td>)</td></tr></table>"
+    page = convert_html(html).text
+    quote = "Adjusted EBITDA $ (4,173 )"
+    assert quote in page
+    calc, findings = one(pages, "adjusted_ebitda", "4173", page, quote)
+    assert findings == rejected("adjusted_ebitda", "4173") and calc["inputs"]["fy-2024"] == {}
+    assert one(pages, "adjusted_ebitda", "-4173", page, quote)[1] == []
+    text = "Adjusted EBITDA ( $ 4,173 ) for 2024"
+    assert one(pages, "adjusted_ebitda", "-4173", text, text)[1] == []
+    text = "Interest expense, net (1,286 ) for the year"
+    assert one(pages, "interest_expense_net", "-1286", text, text)[1] == []
+
+
+def test_truncated_quote_keeps_the_page_sign(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    page = "Adjusted EBITDA $ (4,173 ) and $ 3,395"
+    for quote in ("Adjusted EBITDA $ (4,173", "4,173 ) and $ 3,395"):
+        calc, findings = one(pages, "adjusted_ebitda", "4173", page, quote)
+        assert findings == rejected("adjusted_ebitda", "4173"), quote
+        assert calc["inputs"]["fy-2024"] == {}
+        assert one(pages, "adjusted_ebitda", "-4173", page, quote)[1] == [], quote
+    page = "(compared with Adjusted EBITDA of $3,395)"
+    assert one(pages, "adjusted_ebitda", "3395", page, "Adjusted EBITDA of $3,395)")[1] == []
+
+
+def test_quote_edge_cannot_cut_a_number(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    page = "Total debt 25,068 at December 31, 2024."
+    for value, quote in (("25", "Total debt 25"), ("5068", "5,068 at December")):
+        calc, findings = one(pages, "total_debt", value, page, quote)
+        assert findings == rejected("total_debt", value), quote
+        assert calc["inputs"]["fy-2024"] == {}
+    assert one(pages, "total_debt", "25068", page, "Total debt 25,068")[1] == []
+
+
+def test_number_run_is_read_whole(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    for value, text in (
+        ("1", "Total debt 1,25 at year end"),
+        ("234", "Total debt .1,234 at year end"),
+        ("234", "Total debt \u0663,234 at year end"),
+    ):
+        calc, findings = one(pages, "total_debt", value, text, text)
+        assert findings == rejected("total_debt", value), text
+        assert calc["inputs"]["fy-2024"] == {}
+    page = "Total debt 25,068\u00b9 at December 31, 2024."
+    for value in ("25", "25068"):
+        calc, findings = one(pages, "total_debt", value, page, page[:28])
+        assert findings == rejected("total_debt", value), value
+        assert calc["inputs"]["fy-2024"] == {}
+
+
+def test_nil_dash_must_stand_alone_on_the_page(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    quote = "Revolver borrowings -"
+    calc, findings = one(pages, "rcf_drawn", "0", "Revolver borrowings -302 at year end", quote)
+    assert findings == rejected("rcf_drawn", "0") and calc["inputs"]["fy-2024"] == {}
+    assert one(pages, "rcf_drawn", "0", "Revolver borrowings - at year end", quote)[1] == []
+
+
+def test_derived_repeat_ignores_sign_and_source_case(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    n = put(pages, "Current portion of long-term debt (487) and term loan 24,581 at year end.")
+    q = "Current portion of long-term debt (487)"
+    pos = {"value": "487", "source": SRC, "page": n, "quote": q}
+    loan = {"value": "24581", "source": SRC, "page": n, "quote": "and term loan 24,581 at year end"}
+    parts = [loan, pos, pos | {"value": "-487"}]
+    row = {"field": "total_debt", "period": "fy-2024", "value": "24581", "derived": parts}
+    findings = compute(block([row], ["fy-2024"]), pages.root)[1]
+    assert "total_debt fy-2024 component 2: repeats the citation of component 1" in findings
+    n = put(pages, "Total debt 487 and more")
+    a = {"value": "487", "source": "x.htm", "page": n, "quote": "Total debt 487 and more"}
+    parts = [a, a | {"source": "X.HTM"}]
+    row = {"field": "total_debt", "period": "fy-2024", "value": "974", "derived": parts}
+    findings = compute(block([row], ["fy-2024"]), pages.root)[1]
+    assert "total_debt fy-2024 component 1: repeats the citation of component 0" in findings
+
+
+def test_figures_are_read_from_every_occurrence_and_wrap(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    q = "Cash flow ( 1,000"
+    page = f"{q} more. {q} ) more. {q} more."
+    assert one(pages, "ebitda", "-1000", page, q)[1] == []
+    page = "Cash 5,068 first. Then total debt 25 at December"
+    calc, findings = one(pages, "total_debt", "5068", page, "total debt 25 at December")
+    assert findings == rejected("total_debt", "5068") and calc["inputs"]["fy-2024"] == {}
+    page = "Total debt 25,0-\n68 at December 31, 2024."
+    assert one(pages, "total_debt", "25068", page, "Total debt 25,068 at")[1] == []
+    page = "The cash flow-\nbased EBITDA 4,173 for 2024"
+    assert one(pages, "ebitda", "4173", page, "cash flow-based EBITDA 4,173 for")[1] == []
 
 
 def test_non_dict_block_still_reports_numbers(tmp_path: Path) -> None:
