@@ -1,12 +1,16 @@
 """The static HTML report: one offline file, no JavaScript, fonts and logo inlined."""
 
 import base64
+import json
 import os
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
+from typing import Any
 
+from rbot.charts import ChartMark, ChartSpec, render_svg
 from rbot.handoff import section_units
 from rbot.markdown import esc, inline, to_html
 
@@ -102,6 +106,76 @@ def _cover(context: Mapping[str, object], modules: Sequence[str]) -> str:
     )
 
 
+_RATIO_ROWS = (
+    ("gross_leverage", "Gross leverage"),
+    ("net_leverage", "Net leverage"),
+    ("interest_cover", "Interest cover"),
+    ("liquidity", "Liquidity"),
+)
+_CHART_ROWS = _RATIO_ROWS[:2]
+_EBITDA_NOTE = "Leverage on reported EBITDA where EBITDA As Defined is not reported."
+
+
+def _gap_title(calc: Mapping[str, Any], period: str, name: str) -> str:
+    """The calculator's gap text for a null ratio, else a plain statement that it is missing."""
+    prefix = f"{period}: {name}"
+    return next((g for g in calc["gaps"] if g.startswith(prefix)), f"{name} not available")
+
+
+def _metric_cell(calc: Mapping[str, Any], period: str, name: str) -> str:
+    raw = calc["ratios"][period][name]
+    if raw is None:
+        return f'<td class="num" title="{_esc(_gap_title(calc, period, name))}">{DASH}</td>'
+    if name == "liquidity":
+        text = f"{calc['currency']} {Decimal(raw):,f}{calc['unit']}"
+    else:
+        text = f"{Decimal(raw).quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN)}x"
+    return f'<td class="num">{_esc(text)}</td>'
+
+
+def _leverage_chart(calc: Mapping[str, Any]) -> str:
+    periods = tuple(calc["periods"])
+    marks = tuple(
+        ChartMark(label, p, None if (v := calc["ratios"][p][name]) is None else Decimal(v))
+        for name, label in _CHART_ROWS
+        for p in periods
+    )
+    svg = render_svg(
+        ChartSpec("line", "x", periods, marks), chart_id="key-metrics-leverage", title="Leverage"
+    )
+    legend = "".join(
+        f'<span><span class="sw sw{i}"></span>{label}</span>'
+        for i, (_, label) in enumerate(_CHART_ROWS, 1)
+    )
+    return f'<figure class="chart-figure">{svg}<div class="legend">{legend}</div></figure>'
+
+
+def _metrics(work: Path) -> str:
+    """Key metrics table and leverage chart from work/calculation.json; empty without it."""
+    path = work / "calculation.json"
+    if not path.is_file():
+        return ""
+    calc = json.loads(path.read_text(encoding="utf-8"))
+    periods: list[str] = calc["periods"]
+    head = "".join(f'<th class="num" scope="col">{_esc(p)}</th>' for p in periods)
+    body = "".join(
+        f'<tr><th scope="row">{label}</th>'
+        + "".join(_metric_cell(calc, p, name) for p in periods)
+        + "</tr>"
+        for name, label in _RATIO_ROWS
+    )
+    table = (
+        f'<table><thead><tr><th scope="col">Metric</th>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table>"
+    )
+    ebitda = any(calc["ratios"][p]["basis"] == "ebitda" for p in periods)
+    note = f'<p class="muted">{_EBITDA_NOTE}</p>' if ebitda else ""
+    return (
+        f'<section id="key-metrics"><h2>Key metrics</h2>{table}{note}'
+        f"{_leverage_chart(calc)}</section>"
+    )
+
+
 def _gap_items(md: str) -> list[str]:
     """Gap items: the shared units of ``## Gaps`` minus the "none" placeholders."""
     return [u for u in section_units(md, "Gaps") if not _NO_GAPS.fullmatch(u)]
@@ -151,6 +225,7 @@ def render(work: Path, context: Mapping[str, object], modules: Sequence[str]) ->
     body = (
         '<main class="doc">'
         + _cover(context, present)
+        + _metrics(work)
         + "".join(sections)
         + _sources(work)
         + _gaps(gaps)
