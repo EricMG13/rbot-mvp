@@ -646,3 +646,10 @@ def test_common_prompt_states_page_file_rule(case: Case) -> None:
     prompt = " ".join(prompt_of(case).split())
     assert "p0111.txt" in prompt
     assert "grep tool" in prompt
+
+
+def test_cp0_prompt_puts_verdict_in_next_module(case: Case) -> None:
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+    prompt = " ".join(prompt_of(case).split())
+    assert "Do not put the verdict in Findings" in prompt
+    assert "first a line `Verdict:" in prompt
