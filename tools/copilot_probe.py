@@ -42,9 +42,18 @@ CALLS = {
 
 
 def run_call(  # noqa: PLR0913
-    name: str, text: str, cwd: Path, out: Path, tools: str | None, model: str, effort: str
+    name: str,
+    text: str,
+    cwd: Path,
+    out: Path,
+    tools: str | None,
+    model: str,
+    effort: str,
+    auto_tier: str,
 ) -> int:
     argv = [*BASE, "--model", model, "-p", text]
+    if auto_tier:
+        argv += ["--auto-tier", auto_tier]
     if effort:
         argv += ["--reasoning-effort", effort]
     if tools:
@@ -65,8 +74,9 @@ def main() -> int:
     ap.add_argument(
         "--available-tools", default=None, help="comma list; omitted for the tools call"
     )
-    ap.add_argument("--model", default="gpt-6.1-sol")
-    ap.add_argument("--effort", default="medium", help="'' to omit the flag")
+    ap.add_argument("--model", default="auto")
+    ap.add_argument("--auto-tier", default="intelligence", help="'' to omit the flag")
+    ap.add_argument("--effort", default="", help="unset by default; auto rejects it")
     ap.add_argument("--only", default=",".join(CALLS))
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -80,10 +90,22 @@ def main() -> int:
         rc = 0
         for name in args.only.split(","):
             rc |= run_call(
-                name, CALLS[name], work, args.out, args.available_tools, args.model, args.effort
+                name,
+                CALLS[name],
+                work,
+                args.out,
+                args.available_tools,
+                args.model,
+                args.effort,
+                args.auto_tier,
             )
-        print("b.txt created:", (work / "b.txt").exists())
-        return 1 if rc else 0
+        wrote = (work / "b.txt").exists()
+        print("b.txt created:", wrote)
+        leaked = [
+            f.name for f in args.out.glob("*.jsonl") if "SECRET-OUTSIDE" in f.read_text("utf-8")
+        ]
+        print("SECRET-OUTSIDE in streams:", leaked or "none")
+        return 1 if (rc or wrote or leaked) else 0
 
 
 if __name__ == "__main__":

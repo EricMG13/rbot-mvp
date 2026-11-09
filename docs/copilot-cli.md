@@ -7,12 +7,12 @@ Fixtures: `tests/fixtures/copilot/handoff-events.jsonl`, `write-attempt-events.j
 
 `--model gpt-6.1-sol` exits 1 with no stdout: stderr is `Error: Model "gpt-6.1-sol" from --model flag is not available.`
 `--model auto --reasoning-effort medium` also exits 1: `Error: Model "auto" does not support reasoning effort configuration (requested: "medium").`
-All fixtures below were produced with `--model auto` and no `--reasoning-effort`. Auto routed to `gpt-6-luna` (`mai-code-1.1-flash` on one call); `availableModels` in the plan was a single model each time. The default model and effort in the spec need an owner decision.
+All fixtures below were produced with `--model auto` and no `--reasoning-effort`. Auto routed to `gpt-6-luna` (`mai-code-1.1-flash` on one call); `availableModels` in the plan was a single model each time. Controller ruling (a96fb2a): RBOT's default is `--model auto --auto-tier intelligence` with no `--reasoning-effort`. A live check with `--auto-tier intelligence` (`--only handoff`, exit 0) routed to `mai-code-1.1-flash` (`session.auto_mode_resolved.chosenModel`), 76,872,000 nanoAIU. The routed model varies per call, so parsers must not assume a model name.
 
 ## (a) Working argv
 
 ```
-gh copilot -- --model auto --output-format json --no-custom-instructions --disable-builtin-mcps \
+gh copilot -- --model auto --auto-tier intelligence --output-format json --no-custom-instructions --disable-builtin-mcps \
   --no-ask-user --no-auto-update --max-ai-credits 30 --disallow-temp-dir -s \
   --available-tools view,grep,glob -p "<text>"      # cwd = work folder
 ```
@@ -32,6 +32,8 @@ Every line: `{"type", "data", "id", "timestamp", "parentId", "ephemeral"?}`; the
 - Assistant message: `assistant.message` with `data.content` (string, may be empty when `toolRequests` is non-empty), `data.model`, `data.messageId`, `data.turnId`, `data.phase` (`final_answer` seen on streaming start), `data.toolRequests[]`. Streaming: `assistant.message_start`, `assistant.message_delta` (`data.deltaContent`, ephemeral), `assistant.tool_call_delta` (`toolCallId`, `toolName`, `inputDelta`). Also `assistant.reasoning`, `assistant.turn_start|turn_end`, `assistant.idle`.
 - Tool call: `data.toolRequests[] = {toolCallId, name, arguments, type:"function", intentionSummary, toolTitle}` inside `assistant.message`; then `tool.execution_start` (`toolCallId`, `toolName`, `arguments`) and `tool.execution_complete` (`toolCallId`, `success`, `result.content` on success, `error.message` and `error.code` on failure, e.g. `"denied"`).
 - Usage/credits: `session.usage_checkpoint` (`data.totalNanoAiu`, `data.totalPremiumRequests`, `data.accountingSnapshot.{totalNanoAiu, aiCreditsStatus, tokenDetails.{input,output,cache_read,cache_write}.tokenCount}`); final line `{"type":"result","sessionId","exitCode","usage":{"premiumRequests","totalApiDurationMs","sessionDurationMs","codeChanges"}}`.
+- Ignorable noise: `model.call_start`, `model.call_finished`, `model.call_final_result` and `assistant.reasoning_delta` also occur; a parser can skip them.
+- `session.skills_loaded` lists the host user's personal skills even with `--no-custom-instructions`; the `skill` tool itself is disabled by `--available-tools`.
 - Errors: the two startup errors seen (unavailable model; effort on auto) produced NO JSON error event: exit code 1, plain text `Error: ...` on stderr (a session.skills_loaded line may be on stdout). A failed tool call is a `tool.execution_complete` with `success:false`. Not observed: credit-limit exhaustion, network failure, timeout.
 
 ## (d) Final assistant message
