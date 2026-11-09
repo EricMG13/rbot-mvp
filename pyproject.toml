@@ -33,8 +33,6 @@ max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
-# xml_part refuses DOCTYPE/ENTITY before parsing; bandit B314 is suppressed inline
-"src/rbot/xlsx.py" = ["S314"]
 
 [tool.mypy]
 python_version = "3.13"

@@ -52,7 +52,7 @@ def xml_part(archive: ZipFile, path: str) -> ET.Element:
     if "\x00" in raw or "<!DOCTYPE" in raw.upper() or "<!ENTITY" in raw.upper():
         raise ValueError("DTD/entity declarations are not supported")
     try:
-        return ET.fromstring(raw)  # nosec B314
+        return ET.fromstring(raw)  # nosec B314  # noqa: S314
     except ET.ParseError as error:
         raise ValueError(f"malformed XML in {path}: {error}") from error
 

@@ -291,3 +291,75 @@ def test_sandbox_violation_wins_over_gh_exit_and_timeout(tmp_path: Path) -> None
             gh=gh_with("--fixture", syn, "--sleep", "30"),
             timeout=1,
         )
+
+
+def event(kind: str, **data: object) -> str:
+    return json.dumps({"type": kind, "data": data})
+
+
+def start(call_id: str, tool: str) -> str:
+    return event("tool.execution_start", toolCallId=call_id, toolName=tool)
+
+
+def done(call_id: str) -> str:
+    return event("tool.execution_complete", toolCallId=call_id, success=True)
+
+
+BIGINT = '{"type":"session.info","data":{"n":' + "1" * 5000 + "}}"
+DEEP = '{"type":"session.info","data":{"a":' + "[" * 10000 + "]" * 10000 + "}}"
+
+
+@pytest.mark.parametrize("value", [False, 0, "x", {}, 5])
+def test_non_list_tool_requests_raise_copilot_error(value: object) -> None:
+    msg = event("assistant.message", content="x", toolRequests=value)
+    with pytest.raises(CopilotError, match="toolRequests"):
+        parse_events([msg, result_line()])
+
+
+@pytest.mark.parametrize("absent", [{}, {"toolRequests": None}])
+def test_absent_or_null_tool_requests_is_empty(absent: dict[str, object]) -> None:
+    msg = event("assistant.message", content="x", **absent)
+    assert parse_events([msg, result_line()]).text == "x"
+
+
+@pytest.mark.parametrize("bad", [BIGINT, DEEP])
+def test_unparseable_numbers_and_nesting_raise_copilot_error(bad: str) -> None:
+    with pytest.raises(CopilotError):
+        parse_events([FINAL, bad, result_line()])
+
+
+@pytest.mark.parametrize("bad", [BIGINT, DEEP])
+def test_sandbox_violation_wins_over_unparseable_line(bad: str) -> None:
+    with pytest.raises(SandboxViolation, match="create"):
+        parse_events([ERR_EVENT, bad, *SYN_BODY, result_line()])
+
+
+def test_bad_utf8_with_forbidden_success_is_sandbox_violation(tmp_path: Path) -> None:
+    raw = tmp_path / "bad.jsonl"
+    syn = (FIX / "synthetic-forbidden-tool-events.jsonl").read_bytes()
+    raw.write_bytes(b'{"type":"x","data":{"a":"\xff"}}\n' + syn)
+    with pytest.raises(SandboxViolation, match="create"):
+        call("p", cwd=tmp_path, attempt_dir=tmp_path / "a", gh=gh_with("--fixture", str(raw)))
+
+
+@pytest.mark.parametrize("opts", [("--exit", "1"), ("--sleep", "30")])
+def test_started_forbidden_tool_without_complete_is_sandbox_violation(
+    tmp_path: Path, opts: tuple[str, ...]
+) -> None:
+    raw = tmp_path / "started.jsonl"
+    raw.write_text("\n".join(SYN_BODY[:3]) + "\n", encoding="utf-8", newline="\n")
+    with pytest.raises(SandboxViolation, match="create"):
+        call(
+            "p",
+            cwd=tmp_path,
+            attempt_dir=tmp_path / "a",
+            gh=gh_with("--fixture", str(raw), *opts),
+            timeout=1,
+        )
+
+
+def test_reused_tool_call_id_does_not_hide_a_forbidden_success() -> None:
+    stream = [start("c", "create"), start("c", "view"), done("c"), FINAL, result_line()]
+    assert parse_events(stream).ran == ("create",)
+    with pytest.raises(SandboxViolation, match="create"):
+        parse_events([*stream[:-1], result_line(1)])

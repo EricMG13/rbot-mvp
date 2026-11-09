@@ -48,7 +48,7 @@ Safety stop NOT triggered: `b.txt` was not created and the outside contents were
 
 ## (f) Credits for small calls
 
-`totalNanoAiu` per call: tools 319,340,000 (1 premium request, long listing, first call); handoff 67,078,000 (3 turns); write-attempt 37,432,000; escape-attempt 46,521,500 (first probe capture; the committed `call()` capture, 10 turns of denied reads, used 774,756,000 and took 53 s); trivial "ok" call 24,594,500. Each reports `totalPremiumRequests: 1`. If 1 AIU = 1e9 nanoAIU these are 0.02-0.32 AIU, far below `--max-ai-credits 30`; the unit mapping to `--max-ai-credits` is not verified. The small calls took about 6 s wall time each.
+`totalNanoAiu` per call: tools 319,340,000 (1 premium request, long listing, first call); handoff 67,078,000 (3 turns); write-attempt 37,432,000; escape-attempt 46,521,500 (first probe capture; the committed `call()` capture, 9 tool calls: 5 denied, 1 failed, 3 succeeded inside the folder, used 774,756,000 and took 53 s); trivial "ok" call 24,594,500. Each reports `totalPremiumRequests: 1`. If 1 AIU = 1e9 nanoAIU these are 0.02-0.77 AIU, far below `--max-ai-credits 30`; the unit mapping to `--max-ai-credits` is not verified. The small calls took about 6 s wall time each.
 
 ## (g) Session transcripts are kept by Copilot
 
