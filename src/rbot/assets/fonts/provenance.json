@@ -1,0 +1,52 @@
+[
+  {
+    "file": "RedHatDisplay-SemiBold.woff2",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/fonts/Proportional/RedHatDisplay/webfonts/RedHatDisplay-SemiBold.woff2",
+    "sha256": "5ed4d4d4aa40abda2e2aafd0083e3ee109290c3e86392778e934755a4db67332",
+    "bytes": 32736
+  },
+  {
+    "file": "RedHatDisplay-Bold.woff2",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/fonts/Proportional/RedHatDisplay/webfonts/RedHatDisplay-Bold.woff2",
+    "sha256": "a28973642bc0dc1404138a6b32031b5f1bbc131d1b5a92a0214d16cfe8091793",
+    "bytes": 33292
+  },
+  {
+    "file": "RedHatText-Regular.woff2",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/fonts/Proportional/RedHatText/webfonts/RedHatText-Regular.woff2",
+    "sha256": "8b6c947032e889935aeef9d3a987fe4760b5bb029af531f2511e5824602a550a",
+    "bytes": 31716
+  },
+  {
+    "file": "RedHatText-Medium.woff2",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/fonts/Proportional/RedHatText/webfonts/RedHatText-Medium.woff2",
+    "sha256": "abfc3d5ff9e975d487ec295895efdc2e5848f804d0982bee87ce0d8f55c9a3d1",
+    "bytes": 33084
+  },
+  {
+    "file": "RedHatText-SemiBold.woff2",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/fonts/Proportional/RedHatText/webfonts/RedHatText-SemiBold.woff2",
+    "sha256": "3f3c8935bd6bf319b0b1f3d80b7247646fefa6dd77aca88347d0ab16e7c1e9aa",
+    "bytes": 32952
+  },
+  {
+    "file": "RedHatMono-Medium.woff2",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/fonts/Mono/RedHatMono/webfonts/RedHatMono-Medium.woff2",
+    "sha256": "ab9f475ace2c1e5ed9ee31d964bbadd72dd84b6ab65e71445be80f1fe95c7a0d",
+    "bytes": 27052
+  },
+  {
+    "file": "RedHatMono-SemiBold.woff2",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/fonts/Mono/RedHatMono/webfonts/RedHatMono-SemiBold.woff2",
+    "sha256": "d3c80dda632cbceb3419ef8c6a54af6bf5139b50b83300f467c3c24cdc8e794c",
+    "bytes": 27476
+  },
+  {
+    "file": "OFL.txt",
+    "url": "https://raw.githubusercontent.com/RedHatOfficial/RedHatFont/6bb1048a6402b0076ea04f42951ec66263cd1437/OFL.txt",
+    "sha256": "98eac4800faf2b800dfb11f82e38b779ebe473e05e343c18aeb65eabb74442ae",
+    "bytes": 4393,
+    "upstream_sha256": "4f1417e27511207cd217656c964f1b0d8b0c4a30156a1a699cf16dc5eba0dff6",
+    "adaptation": "Removed one trailing space; license text unchanged."
+  }
+]

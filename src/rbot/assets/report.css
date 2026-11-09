@@ -1,0 +1,67 @@
+/* RBOT report: a single-column credit research document. Tokens only (tokens.css). */
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--rb-ground); }
+body {
+  margin: 0; color: var(--rb-ink); background: var(--rb-ground);
+  font: var(--rb-fs-body)/var(--rb-lh-body) var(--rb-font-text);
+}
+.doc {
+  max-width: 50rem; margin: var(--rb-s-7) auto; padding: var(--rb-s-7) calc(var(--rb-s-7) + var(--rb-s-5));
+  background: var(--rb-panel); border: 1px solid var(--rb-rule);
+}
+.cover { padding-bottom: var(--rb-s-6); border-bottom: 3px solid var(--rb-navy); }
+.cover img.logo { display: block; max-height: 40px; max-width: 200px; margin-bottom: var(--rb-s-6); }
+.wordmark {
+  display: inline-block; margin-bottom: var(--rb-s-6); padding: var(--rb-s-1) var(--rb-s-5);
+  background: var(--rb-logo-field); color: var(--rb-on-navy);
+  font: 600 var(--rb-fs-call)/1.2 var(--rb-font-display); letter-spacing: .14em;
+}
+.cover h1 { margin: 0 0 var(--rb-s-5); font: 600 28px/1.15 var(--rb-font-display); color: var(--rb-navy); }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--rb-s-1) var(--rb-s-6); margin: 0; }
+.facts dt { color: var(--rb-ink-2); font-size: var(--rb-fs-label); text-transform: uppercase; letter-spacing: .06em; }
+.facts dd { margin: 0; font-weight: 600; }
+.toc { margin: var(--rb-s-6) 0 0; padding: 0; list-style: none; columns: 2; font-size: var(--rb-fs-table); }
+.toc a { color: var(--rb-blue); text-decoration: none; }
+.toc a:hover { color: var(--rb-blue-hover); text-decoration: underline; }
+a:focus-visible { outline: var(--rb-focus); outline-offset: 2px; }
+section { margin-top: var(--rb-s-7); padding-top: var(--rb-s-6); border-top: 1px solid var(--rb-rule); }
+h2 { margin: 0 0 var(--rb-s-5); font: 600 var(--rb-fs-page)/1.2 var(--rb-font-display); color: var(--rb-navy); }
+h3, h4, h5, h6 { margin: var(--rb-s-6) 0 var(--rb-s-3); font: 600 var(--rb-fs-call)/1.3 var(--rb-font-display); color: var(--rb-navy); }
+h4 { font-size: var(--rb-fs-issuer); }
+h5, h6 { font-size: var(--rb-fs-body); color: var(--rb-ink-2); }
+p { margin: 0 0 var(--rb-s-5); }
+ul, ol { margin: 0 0 var(--rb-s-5); padding-left: var(--rb-s-7); }
+li { margin-bottom: var(--rb-s-2); }
+strong { font-weight: 600; }
+code { font: 500 .92em var(--rb-font-mono); background: var(--rb-head); padding: 0 var(--rb-s-1); border-radius: var(--rb-r-tag); }
+pre {
+  margin: 0 0 var(--rb-s-5); padding: var(--rb-s-4) var(--rb-s-5); overflow-x: auto;
+  background: var(--rb-head); border: 1px solid var(--rb-rule); border-radius: var(--rb-r-tile);
+  font-size: var(--rb-fs-table); line-height: var(--rb-lh-table);
+}
+pre code { background: none; padding: 0; }
+table { width: 100%; margin: 0 0 var(--rb-s-5); border-collapse: collapse; font-size: var(--rb-fs-table); line-height: var(--rb-lh-table); }
+th, td { padding: var(--rb-s-2) var(--rb-s-3); border-bottom: 1px solid var(--rb-rule); text-align: left; vertical-align: top; }
+thead th { background: var(--rb-head); border-bottom: 2px solid var(--rb-navy); font-weight: 600; font-size: var(--rb-fs-label); }
+tbody tr:nth-child(even) td { background: var(--rb-head); }
+.tag {
+  display: inline-block; margin-right: var(--rb-s-3); padding: 0 var(--rb-s-2);
+  background: var(--rb-caut-tint); color: var(--rb-caut); border-radius: var(--rb-r-tag);
+  font: 500 var(--rb-fs-micro)/1.6 var(--rb-font-mono);
+}
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.muted { color: var(--rb-ink-3); }
+.gaps li { list-style: none; margin-left: calc(-1 * var(--rb-s-7)); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+@media (max-width: 40rem) { .doc { margin: 0; padding: var(--rb-s-6) var(--rb-s-5); border: 0; } .toc { columns: 1; } }
+@media print {
+  @page { margin: 16mm; }
+  html, body { background: var(--rb-panel); }
+  body { font-size: var(--rb-fs-body); }
+  .doc { max-width: none; margin: 0; padding: 0; border: 0; }
+  section { break-inside: auto; }
+  h2, h3, h4 { break-after: avoid; }
+  table, pre, tr { break-inside: avoid; }
+  .cover, .wordmark, thead th, .tag { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .toc a { color: var(--rb-ink); }
+}

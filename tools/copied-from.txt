@@ -1,3 +1,11 @@
 source fda70c29296797766ecfd52908b57740eb3bafef
 src/rbot/html_text.py <- src/deploy_workflow/html_text.py
 edited src/rbot/xlsx.py <- src/deploy_vii/preparation.py
+src/rbot/assets/tokens.css <- src/deploy_vii/assets/tokens.css
+src/rbot/assets/fonts/OFL.txt <- src/deploy_vii/assets/fonts/OFL.txt
+src/rbot/assets/fonts/provenance.json <- src/deploy_vii/assets/fonts/provenance.json
+src/rbot/assets/fonts/RedHatDisplay-SemiBold.woff2 <- src/deploy_vii/assets/fonts/RedHatDisplay-SemiBold.woff2
+src/rbot/assets/fonts/RedHatText-Regular.woff2 <- src/deploy_vii/assets/fonts/RedHatText-Regular.woff2
+src/rbot/assets/fonts/RedHatText-SemiBold.woff2 <- src/deploy_vii/assets/fonts/RedHatText-SemiBold.woff2
+src/rbot/assets/fonts/RedHatMono-Medium.woff2 <- src/deploy_vii/assets/fonts/RedHatMono-Medium.woff2
+edited src/rbot/assets/shell.html <- src/deploy_vii/assets/shell.html
