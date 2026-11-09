@@ -59,6 +59,6 @@ dev = [
 ]
 
 [tool.mutmut]
-paths_to_mutate = ["src/rbot/calc/cp1.py"]
-tests_dir = ["tests/test_calc_cp1.py"]
+source_paths = ["src/rbot/calc/cp1.py"]
+pytest_add_cli_args_test_selection = ["tests/test_calc_cp1.py"]
 also_copy = ["tests/oracles", "src/rbot"]
