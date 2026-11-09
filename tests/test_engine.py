@@ -721,3 +721,39 @@ def test_retry_header_offers_next_module_for_unquoted_conclusion(case: Case) -> 
     run_case(case.case, case.work, gh=case.script(events(bare), events(VALID)))
     retry = " ".join(prompt_of(case, n=2).split("## Findings from your previous")[1].split())
     assert "move an unquoted conclusion to ## Next module" in retry
+
+
+def _uncited() -> str:
+    return VALID.replace(
+        '"Acme Corp annual report" [a.txt p.1]', 'He said "Acme Corp annual report" and left.'
+    )
+
+
+def test_retry_inlines_previous_handoff(case: Case) -> None:
+    first = _uncited()
+    run_case(case.case, case.work, gh=case.script(events(first), events(VALID)))
+    retry = prompt_of(case, n=2)
+    assert "## Your previous handoff" in retry
+    assert first in retry
+    assert "Change only what the findings below name" in retry
+    assert retry.index("## Your previous handoff") < retry.index(
+        "## Findings from your previous attempt"
+    )
+    assert "## Your previous handoff" not in prompt_of(case, n=1)
+
+
+def test_retry_fence_survives_tilde_lines(case: Case) -> None:
+    first = _uncited() + "\n~~~~\nstray\n"
+    run_case(case.case, case.work, gh=case.script(events(first), events(VALID)))
+    retry = prompt_of(case, n=2)
+    assert first in retry
+    assert "\n~~~~~markdown\n" in retry
+    assert "\n~~~~~\n" in retry
+
+
+def test_fingerprint_ignores_retry_content(case: Case) -> None:
+    gh = case.script(events(_uncited()), events(VALID))
+    run_case(case.case, case.work, gh=gh)
+    assert case.calls() == 2
+    run_case(case.case, case.work, gh=gh)
+    assert case.calls() == 2

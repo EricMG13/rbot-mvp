@@ -270,6 +270,19 @@ def _accepted(handoff: Path, fp: Path, fingerprint: str, source_text: Path) -> b
     return not check(stored, source_text, quoted_findings=True)
 
 
+HANDOFF_INTRO = (
+    "Start from this handoff. Change only what the findings below name; keep everything else "
+    "word for word."
+)
+
+
+def _fenced(text: str) -> str:
+    """The text in a `~` fence longer than any line-leading `~~~~` run, so it cannot close early."""
+    runs = [len(m) for m in re.findall(r"^~{4,}", text, flags=re.M)]
+    fence = "~" * (max(runs) + 1 if runs else 4)
+    return f"{fence}markdown\n{text}\n{fence}"
+
+
 def _run_module(module: str, prompt: str, setup: Setup) -> None:
     work = setup.work
     fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
@@ -277,6 +290,7 @@ def _run_module(module: str, prompt: str, setup: Setup) -> None:
     if _accepted(handoff, fp, fingerprint, work / "source-text"):
         return
     findings: list[str] = []
+    text = ""
     for n in range(1, ATTEMPTS + 1):
         text_prompt = prompt
         if findings:
@@ -285,6 +299,7 @@ def _run_module(module: str, prompt: str, setup: Setup) -> None:
             rules += [GREP_RULE] * any(NOT_FOUND in f for f in findings)
             rule = "".join(f"\n{r}\n" for r in rules)
             text_prompt += (
+                f"\n\n## Your previous handoff\n\n{HANDOFF_INTRO}\n\n{_fenced(text)}"
                 "\n\n## Findings from your previous attempt\n\nFix every item and reply with the "
                 f"complete handoff again:{rule}\n" + "\n".join(f"- {f}" for f in findings)
             )
