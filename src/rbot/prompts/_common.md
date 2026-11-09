@@ -25,7 +25,7 @@ upstream handoffs named below.
   text, for example `"exact words" [file.htm p.12]`. This holds even when several quotes come
   from the same page: a citation at the end of a paragraph does not cover the quotes before it.
 - Back every item and paragraph of `## Findings` with at least one verbatim quote of 12 or more
-  characters and its citation. A finding with no quote is rejected.
+  characters and its citation. A finding with no quote is rejected. Conclusions without a quote belong in `## Next module`, not in Findings.
 - Quote with straight double quotes. Keep any inner quotes exactly as on the page. A quote of
   12 or more characters must be verbatim from the cited page.
 

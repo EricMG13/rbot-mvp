@@ -252,7 +252,8 @@ def _attempt_once(
 NO_CITATION = "no citation right after it"
 NO_QUOTE = "Findings item with no verified quote"
 QUOTE_RULE = (
-    "Back every Findings item with at least one verbatim quote (12+ characters) and its citation."
+    "Back every Findings item with at least one verbatim quote (12+ characters) and its "
+    "citation, or move an unquoted conclusion to ## Next module."
 )
 NOT_FOUND = "quote not found on"
 GREP_RULE = (

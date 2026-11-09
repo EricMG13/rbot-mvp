@@ -652,7 +652,7 @@ def test_common_prompt_states_page_file_rule(case: Case) -> None:
 def test_cp0_prompt_puts_verdict_in_next_module(case: Case) -> None:
     run_case(case.case, case.work, gh=case.script(events(VALID)))
     prompt = " ".join(prompt_of(case).split())
-    assert "Do not put the verdict in Findings" in prompt
+    assert "Do not put the verdict, a sufficiency or adequacy conclusion" in prompt
     assert "first a line `Verdict:" in prompt
 
 
@@ -704,3 +704,20 @@ def test_resume_reruns_a_stored_handoff_with_an_unquoted_finding(case: Case) -> 
     run_case(case.case, case.work, gh=gh)
     assert case.calls() == 2
     assert stored.read_text(encoding="utf-8") == VALID
+
+
+def test_prompt_sends_conclusions_to_next_module(case: Case) -> None:
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+    prompt = " ".join(prompt_of(case).split())
+    assert "a sufficiency or adequacy conclusion" in prompt
+    assert "Conclusions without a quote belong in" in prompt
+
+
+def test_retry_header_offers_next_module_for_unquoted_conclusion(case: Case) -> None:
+    bare = VALID.replace(
+        'The issuer is "Acme Corp annual report" [a.txt p.1], as of 2025-03-31, FY2024.',
+        'The issuer is "Acme Corp annual report" [a.txt p.1].\n\n- The source set is adequate.',
+    )
+    run_case(case.case, case.work, gh=case.script(events(bare), events(VALID)))
+    retry = " ".join(prompt_of(case, n=2).split("## Findings from your previous")[1].split())
+    assert "move an unquoted conclusion to ## Next module" in retry
