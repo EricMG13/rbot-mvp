@@ -1,25 +1,17 @@
 """OOXML workbook reader: stored cell lexemes only, no formula calculation, macros or links.
 
-Provenance: rewritten from Final-workflow src/deploy_vii/preparation.py at fda70c29
-(xlsx_content, xml_part, _cell_address, _sheet_status, NS, REL, MAX_EXPANDED_BYTES). Listed as
-new code, not as an edited copy: the source is a 607-line module this file only partly reuses.
+Edited extract of Final-workflow src/deploy_vii/preparation.py at fda70c29 (xlsx_content,
+xml_part, _cell_address, _sheet_status, NS, REL, MAX_EXPANDED_BYTES); see tools/copied-from.txt.
 The pydantic Span and Coverage are frozen dataclasses with the same fields.
 """
 
-import importlib
 import io
 import posixpath
+import xml.etree.ElementTree as ET  # nosec B405
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 from urllib.parse import quote
 from zipfile import ZipFile
-
-# The stdlib parser is loaded by name: one suppression instead of an import plus a call rule per
-# use (the suppression count may only fall). The parse is made safe by xml_part,
-# which refuses any DOCTYPE/ENTITY declaration and NUL byte before parsing; no external entity or
-# expansion can occur without a declaration.
-ET: Any = importlib.import_module("xml.etree.ElementTree")  # nosec B405
-Element = Any
 
 MAX_EXPANDED_BYTES = 200 * 1024 * 1024
 NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -53,14 +45,14 @@ class Extraction:
     limitations: tuple[str, ...] = ()
 
 
-def xml_part(archive: ZipFile, path: str) -> Element:
+def xml_part(archive: ZipFile, path: str) -> ET.Element:
     # Reject alternate encodings before the declaration check: UTF-16 NUL bytes
     # must not hide an entity declaration from this boundary.
     raw = archive.read(path).decode("utf-8-sig", errors="strict")
     if "\x00" in raw or "<!DOCTYPE" in raw.upper() or "<!ENTITY" in raw.upper():
         raise ValueError("DTD/entity declarations are not supported")
     try:
-        return ET.fromstring(raw)
+        return ET.fromstring(raw)  # nosec B314
     except ET.ParseError as error:
         raise ValueError(f"malformed XML in {path}: {error}") from error
 
@@ -90,7 +82,7 @@ def _sheet_status(spans: list[Span]) -> Literal["retained", "empty"]:
     return "retained" if content else "empty"
 
 
-def _texts(node: Element, *paths: str) -> str:
+def _texts(node: ET.Element, *paths: str) -> str:
     return "".join(t.text or "" for path in paths for t in node.findall(path, NS))
 
 
@@ -114,7 +106,7 @@ def _styles(archive: ZipFile) -> list[str]:
     ]
 
 
-def _cell_text(cell: Element, kind: str, stored: str | None, strings: list[str]) -> str:
+def _cell_text(cell: ET.Element, kind: str, stored: str | None, strings: list[str]) -> str:
     if kind == "s":
         string_index = int(stored or "-1")
         if not 0 <= string_index < len(strings):
@@ -126,7 +118,7 @@ def _cell_text(cell: Element, kind: str, stored: str | None, strings: list[str])
 
 
 def _cell_span(
-    cell: Element,
+    cell: ET.Element,
     locator: str,
     strings: list[str],
     styles: list[str],
@@ -155,7 +147,7 @@ def _cell_span(
 
 
 def _sheet_spans(
-    tree: Element, prefix: str, hidden_sheet: bool, strings: list[str], styles: list[str]
+    tree: ET.Element, prefix: str, hidden_sheet: bool, strings: list[str], styles: list[str]
 ) -> list[Span]:
     columns = tree.findall("s:cols/s:col", NS)
     spans: list[Span] = []
@@ -186,7 +178,7 @@ def _sheet_spans(
     return spans
 
 
-def _sheet_path(relationship: Element) -> str:
+def _sheet_path(relationship: ET.Element) -> str:
     if relationship.get("TargetMode") == "External":
         raise ValueError("External worksheet relationship is unsupported")
     target = relationship.attrib["Target"]
@@ -250,6 +242,8 @@ def xlsx_content(raw: bytes) -> Extraction:
             spans.extend(found)
             coverage.append(Coverage(locator=prefix, status=_sheet_status(found)))
         spans.extend(_comment_spans(archive))
+        if len({span.locator for span in spans}) != len(spans):
+            raise ValueError("Duplicate extracted locators")
         return Extraction(spans=tuple(spans), coverage=tuple(coverage), limitations=limitations)
 
 

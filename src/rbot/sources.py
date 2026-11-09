@@ -3,6 +3,7 @@
 import io
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,11 +34,12 @@ def _chunks(text: str, size: int) -> list[str]:
 
 def _pdf_pages(raw: bytes) -> list[str]:
     try:
-        reader = PdfReader(io.BytesIO(raw))
+        reader = PdfReader(io.BytesIO(raw), strict=True)
         if reader.is_encrypted:
             raise SourceError("encrypted PDF")
         return [page.extract_text(extraction_mode="layout") for page in reader.pages]
-    except PyPdfError as error:
+    # pypdf meets a damaged trailer or page tree with AttributeError (FW preparation.py).
+    except (PyPdfError, AttributeError) as error:
         raise SourceError(f"unreadable PDF: {error}") from error
 
 
@@ -51,15 +53,31 @@ def _html_pages(raw: bytes) -> list[str]:
 def _xlsx_pages(raw: bytes) -> list[str]:
     try:
         return sheet_pages(raw)
-    except (ValueError, KeyError, zipfile.BadZipFile) as error:
+    # Damaged input is an unreadable source, never a crash: zlib.error, EOFError and RuntimeError
+    # (encrypted member) come from zipfile; the rest from the XML and cell readers (FW list).
+    except (
+        ValueError,
+        UnicodeError,
+        PyPdfError,
+        zipfile.BadZipFile,
+        zlib.error,
+        EOFError,
+        RuntimeError,
+        KeyError,
+        IndexError,
+        TypeError,
+        NotImplementedError,
+    ) as error:
         raise SourceError(f"unreadable workbook: {error!r}") from error
 
 
 def _text_pages(raw: bytes) -> list[str]:
     try:
-        text = raw.decode("utf-8", errors="strict")
+        text = raw.decode("utf-8-sig", errors="strict")
     except UnicodeDecodeError as error:
         raise SourceError(f"not UTF-8: {error}") from error
+    if "\x00" in text:
+        raise SourceError("NUL bytes: not supported UTF-8 text")
     return _chunks(re.sub(r"\r\n?", "\n", text), TEXT_CHUNK)
 
 
@@ -85,6 +103,8 @@ def write_source_text(sources: Path, out: Path) -> tuple[list[SourceText], list[
         pages = extract_pages(path)
         folder = out / path.name
         folder.mkdir(parents=True, exist_ok=True)
+        for stale in folder.glob("p*.txt"):
+            stale.unlink()
         for number, text in enumerate(pages, 1):
             with (folder / f"p{number:04d}.txt").open("w", encoding="utf-8", newline="\n") as f:
                 f.write(text)

@@ -152,3 +152,90 @@ def test_page_files_utf8_lf(sources_dir: Path, tmp_path: Path, pdf_bytes: bytes)
     for page in (out / "a.txt" / "p0001.txt", out / "b.pdf" / "p0002.txt"):
         assert b"\r" not in page.read_bytes()
     assert (out / "a.txt" / "p0001.txt").read_text(encoding="utf-8").startswith("line1\nline2 é")
+
+
+def _book(extra: dict[str, str] | None = None, sheet_cells: str | None = None) -> bytes:
+    cells = sheet_cells or '<row r="1"><c r="A1"><v>1</v></c></row>'
+    sheet = f'<worksheet xmlns="{MAIN}"><sheetData>{cells}</sheetData></worksheet>'
+    base = make_xlsx(sheet_xml=sheet)
+    if not extra:
+        return base
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(base)) as src, zipfile.ZipFile(buffer, "w") as dst:
+        for item in src.namelist():
+            dst.writestr(item, src.read(item))
+        for name, body in extra.items():
+            dst.writestr(name, body)
+    return buffer.getvalue()
+
+
+def test_xlsx_comment_author_out_of_range_raises(sources_dir: Path) -> None:
+    comments = (
+        f'<comments xmlns="{MAIN}"><authors><author>a</author></authors><commentList>'
+        '<comment ref="A1" authorId="5"><text><t>x</t></text></comment></commentList></comments>'
+    )
+    path = sources_dir / "c.xlsx"
+    path.write_bytes(_book({"xl/comments1.xml": comments}))
+    with pytest.raises(SourceError):
+        extract_pages(path)
+
+
+def test_xlsx_corrupt_deflate_raises(sources_dir: Path) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(make_xlsx())) as src:
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.namelist():
+                dst.writestr(item, src.read(item))
+    raw = bytearray(buffer.getvalue())
+    start = raw.find(b"PK\x03\x04")
+    name_len = int.from_bytes(raw[start + 26 : start + 28], "little")
+    extra_len = int.from_bytes(raw[start + 28 : start + 30], "little")
+    data = start + 30 + name_len + extra_len
+    raw[data : data + 8] = b"\xff" * 8
+    path = sources_dir / "d.xlsx"
+    path.write_bytes(bytes(raw))
+    with pytest.raises(SourceError):
+        extract_pages(path)
+
+
+def test_xlsx_duplicate_cell_address_raises(sources_dir: Path) -> None:
+    cells = '<row r="1"><c r="A1"><v>1</v></c><c r="A1"><v>2</v></c></row>'
+    path = sources_dir / "dup.xlsx"
+    path.write_bytes(_book(sheet_cells=cells))
+    with pytest.raises(SourceError):
+        extract_pages(path)
+
+
+def test_xlsx_malformed_xml_raises(sources_dir: Path) -> None:
+    path = sources_dir / "m.xlsx"
+    path.write_bytes(make_xlsx(sheet_xml="<worksheet><unclosed>"))
+    with pytest.raises(SourceError):
+        extract_pages(path)
+
+
+def test_pdf_damaged_structure_raises(sources_dir: Path, pdf_bytes: bytes) -> None:
+    path = sources_dir / "dmg.pdf"
+    path.write_bytes(pdf_bytes.replace(b"/Kids [3 0 R 5 0 R]", b"/Kids 7        "))
+    with pytest.raises(SourceError):
+        extract_pages(path)
+
+
+def test_text_bom_stripped_and_nul_refused(sources_dir: Path) -> None:
+    bom = sources_dir / "bom.txt"
+    bom.write_bytes(b"\xef\xbb\xbfhello")
+    assert extract_pages(bom) == ["hello"]
+    nul = sources_dir / "nul.txt"
+    nul.write_bytes(b"a\x00b")
+    with pytest.raises(SourceError):
+        extract_pages(nul)
+
+
+def test_stale_pages_cleared(sources_dir: Path, tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    stale = out / "a.txt" / "p0005.txt"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old", encoding="utf-8")
+    (sources_dir / "a.txt").write_text("new", encoding="utf-8")
+    write_source_text(sources_dir, out)
+    assert not stale.exists()
+    assert (out / "a.txt" / "p0001.txt").read_text(encoding="utf-8") == "new"
