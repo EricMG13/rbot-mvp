@@ -57,11 +57,29 @@ model, covenant opinion, full credit report or transaction assessment.
    module do not block supported work. A genuine identity ambiguity, unusable required content or
    a missing required source restricts the affected work. Never make a missing downstream
    analytical handoff a source-readiness condition.
-7. Verdict: ready, ready with limitations, conditional (a named missing source prevents the
-   work) or blocked (unusable evidence or an unresolved critical identity boundary), with reasons.
+7. Assess every consumer of this source set that the requested work names, by its own
+   evidence demand; an alias names the whole owning workflow. Give one verdict per consumer:
+   - READY: adequate located evidence without relevant gaps.
+   - READY WITH LIMITATIONS: the owner can perform its method with bounded gaps.
+   - CONDITIONAL: a named missing source prevents that owner's workflow.
+   - BLOCKED: unusable evidence, or an unresolved critical identity boundary.
+   Carry every relevant preparation, classification and gap limitation into each assessment.
    Explain usable coverage, the strongest contrary evidence and limitations, what cannot proceed
    and the next evidence action, as evidence, then source risk, then downstream consequence. Do
    not invent certainty or confidence scores.
+8. If the requested work is an HTML model, assess source evidence for discrete quarters, fiscal
+   years, quarter and year-to-date distinctions, segments, add-backs, KPIs, facility-level debt
+   and carrying values, cash-paid interest and tax, and business and transaction narrative.
+   Excel files are analytical inputs only; a workbook output is not a requirement. State
+   "source sufficiency only; the CP-MODEL input contract is not evaluated". Do not assert
+   normalised quarters, reconciliation or downstream input acceptance.
+9. No earlier model answer is an authoritative source: inspect the files directly.
+
+## Proof required
+
+- The issuer, periods and unit statements must match the file.
+- Relevant page citations must resolve to the cited pages.
+- No unsupported completeness or credit conclusion may appear.
 
 ## What each section holds
 

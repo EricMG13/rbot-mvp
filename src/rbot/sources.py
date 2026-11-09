@@ -14,6 +14,7 @@ from rbot.html_text import UndecodableHtml, convert_html
 from rbot.xlsx import sheet_pages
 
 SUPPORTED = (".pdf", ".htm", ".html", ".txt", ".md", ".xlsx", ".csv")
+IGNORED = frozenset({".DS_Store"})
 HTML_CHUNK = 3000
 TEXT_CHUNK = 12000
 
@@ -93,14 +94,23 @@ def extract_pages(path: Path) -> list[str]:
     return _text_pages(raw)
 
 
+def _is_junk(path: Path) -> bool:
+    """`.DS_Store` and the `._name` AppleDouble companion of an existing `name`."""
+    name = path.name
+    return name in IGNORED or (name.startswith("._") and (path.parent / name[2:]).is_file())
+
+
 def write_source_text(sources: Path, out: Path) -> tuple[list[SourceText], list[str]]:
     done: list[SourceText] = []
     skipped: list[str] = []
     for path in sorted(p for p in sources.iterdir() if p.is_file()):
-        if path.suffix.lower() not in SUPPORTED:
+        if path.suffix.lower() not in SUPPORTED or _is_junk(path):
             skipped.append(path.name)
             continue
-        pages = extract_pages(path)
+        try:
+            pages = extract_pages(path)
+        except (SourceError, ValueError) as err:  # UnicodeDecodeError is a ValueError
+            raise SourceError(f"{path.name}: {err}") from err
         folder = out / path.name
         folder.mkdir(parents=True, exist_ok=True)
         for stale in folder.glob("p*.txt"):

@@ -15,6 +15,9 @@ upstream handoffs named below.
 
 - Cite a page as `[<source file name> p.N]`, where N is the 1-based page number, for example
   `[annual-report.pdf p.12]`. Use the source file name exactly as listed.
+- Every quote carries its own citation immediately after the closing quote, before any other
+  text, for example `"exact words" [file.htm p.12]`. This holds even when several quotes come
+  from the same page: a citation at the end of a paragraph does not cover the quotes before it.
 - Quote with straight double quotes. Keep any inner quotes exactly as on the page. A quote of
   12 or more characters must be verbatim from the cited page.
 
