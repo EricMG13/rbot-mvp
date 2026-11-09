@@ -8,7 +8,9 @@ never passed through: every text run is escaped with ``html.escape(quote=True)``
 import html
 import re
 
+from rbot.handoff import BULLET as _BULLET
 from rbot.handoff import FENCE, split_lines
+from rbot.handoff import NUMBER as _NUMBER
 
 _INLINE = re.compile(
     r"`(?P<code>[^`]+)`"
@@ -17,8 +19,6 @@ _INLINE = re.compile(
     r"|\[(?P<link>[^\][]{1,500})\]\([^)]{0,2000}\)"
 )
 _HEADING = re.compile(r"(#{1,4})\s+(.*)")
-_BULLET = re.compile(r"[-*]\s+(.*)")
-_NUMBER = re.compile(r"\d+[.)]\s+(.*)")
 _RULE_CELL = re.compile(r":?-+:?")
 _UNSAFE = re.compile("[\ud800-\udfff\u202a-\u202e\u2066-\u2069]")
 
@@ -26,12 +26,6 @@ _UNSAFE = re.compile("[\ud800-\udfff\u202a-\u202e\u2066-\u2069]")
 def esc(text: str) -> str:
     """Escape a text run; lone surrogates and bidi override/isolate characters become U+FFFD."""
     return html.escape(_UNSAFE.sub("\ufffd", text), quote=True)
-
-
-def item_text(line: str) -> str | None:
-    """The text of a ``-`` or ``1.`` list item line, or None when the line is not an item."""
-    m = _BULLET.match(line.strip()) or _NUMBER.match(line.strip())
-    return m.group(1) if m else None
 
 
 def _heading_text(text: str) -> str:
