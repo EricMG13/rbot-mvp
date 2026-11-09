@@ -17,3 +17,4 @@ dist/
 *.xlsx
 !tests/fixtures/**
 audit-requirements.txt
+mutants/
