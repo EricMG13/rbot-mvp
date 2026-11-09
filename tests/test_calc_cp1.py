@@ -760,13 +760,121 @@ def test_citation_repeat_needs_same_source_page_and_quote(tmp_path: Path) -> Non
     assert not any("repeats" in f for f in run(dict(part, source="y.htm")))
     assert not any("repeats" in f for f in run(dict(part, page=n + 1)))
     assert any("repeats" in f for f in run(dict(part)))
-    five, six = dict(part, quote=5), dict(part, quote=6)
+    five, six = dict(part, quote=5), dict(part, quote=6, value="487")
     row = {"field": "total_debt", "period": "fy-2024", "value": "1", "derived": [five, six]}
     out = compute(block([row], ["fy-2024"]), pages.root)[1]
     assert not any("repeats" in f for f in out) and out
     row["derived"] = [five, dict(five)]
     out = compute(block([row], ["fy-2024"]), pages.root)[1]
     assert f"{lab} component 1: repeats the citation of component 0" in out
+
+
+def test_split_number_in_unnormalised_quote_rejected(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    page = "As of December 31, 2024, borrowings of $1,250 million were outstanding under the RCF."
+    cash = "Cash and cash equivalents were $%s million at year end."
+    cases = [
+        ("rcf_drawn", "0", page, "borrowings of $1,25-\n0 million were outstanding"),
+        ("cash_and_equivalents", "6261", cash % "16,261", "were $1-\n6,261 million at year end"),
+        ("cash_and_equivalents", "261", cash % "6,261", "were $6\uff0c261 million at year end"),
+    ]
+    for field, value, text, quote in cases:
+        calc, findings = one(pages, field, value, text, quote)
+        assert findings == [
+            f"{field} fy-2024: value {value!r} is not printed as one number in the quote"
+        ]
+        assert calc["inputs"]["fy-2024"] == {}
+    calc, findings = one(
+        pages, "rcf_drawn", "1250", page, "borrowings of $1,25-\n0 million were outstanding"
+    )
+    assert findings == [] and calc["inputs"]["fy-2024"] == {"rcf_drawn": "1250"}
+    calc, findings = one(
+        pages,
+        "cash_and_equivalents",
+        "6261",
+        cash % "6,261",
+        "were $6\uff0c261 million at year end",
+    )
+    assert findings == []
+    neg = "Interest expense, net \uff081,286\uff09 for the year"
+    assert one(pages, "interest_expense_net", "-1286", neg, neg)[1] == []
+
+
+def test_nil_marker_needs_a_quote_without_other_numbers(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    for quote in (
+        "Note 7 - Debt: borrowings of $1,250 million were outstanding under the revolver",
+        "the revolver \u2014 under which $1,250 million was drawn \u2014 remains in place",
+        "Revolver borrowings outstanding \u2014 at December 31, 2024",
+    ):
+        text = f"Liquidity. {quote}."
+        calc, findings = one(pages, "rcf_drawn", "0", text, quote)
+        assert findings == [
+            "rcf_drawn fy-2024: value '0' is not printed as one number in the quote"
+        ]
+        assert calc["inputs"]["fy-2024"] == {}
+    quote = "Revolver borrowings outstanding \u2014 at year end"
+    assert one(pages, "rcf_drawn", "0", quote, quote)[1] == []
+
+
+def test_positive_ebitda_needs_an_unsigned_token(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    for field in ("ebitda", "adjusted_ebitda"):
+        for printed in ("(4,173)", "-4,173", "\u22124,173", "($4,173)"):
+            text = f"Reported {field} figure {printed} for fiscal 2024"
+            calc, findings = one(pages, field, "4173", text, text)
+            assert findings == [
+                f"{field} fy-2024: value '4173' is not printed as one number in the quote"
+            ]
+            assert calc["inputs"]["fy-2024"] == {}
+            assert one(pages, field, "-4173", text, text)[1] == []
+        text = f"Reported {field} figure 4,173 for fiscal 2024"
+        assert one(pages, field, "4173", text, text)[1] == []
+        assert one(pages, field, "-4173", text, text)[1]
+    for field in ("interest_expense_net", "capex", "revenue"):
+        text = f"Reported {field} figure (4,173) for fiscal 2024"
+        assert one(pages, field, "4173", text, text)[1] == []
+
+
+def test_zero_and_fractional_ebitda_in_parentheses_rejected(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    for value, printed in (("0", "(0)"), ("0.5", "(0.5)")):
+        text = f"Reported EBITDA figure {printed} for fiscal 2024"
+        calc, findings = one(pages, "ebitda", value, text, text)
+        assert findings and calc["inputs"]["fy-2024"] == {}
+
+
+def test_ebitda_derived_components_are_unsigned_only(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    n = put(pages, "Operating income (3,000) and add-backs 813 for the year")
+    q = "Operating income (3,000) and add-backs 813"
+    parts = [{"value": v, "source": SRC, "page": n, "quote": q} for v in ("3000", "813")]
+    row = {"field": "ebitda", "period": "fy-2024", "value": "3813", "derived": parts}
+    findings = compute(block([row], ["fy-2024"]), pages.root)[1]
+    assert findings == [
+        "ebitda fy-2024 component 0: value '3000' is not printed as one number in the quote"
+    ]
+
+
+def test_derived_repeat_is_keyed_on_source_page_and_value(tmp_path: Path) -> None:
+    pages = Pages(tmp_path)
+    n = put(pages, "Total debt 24,581 and current portion 487 at year end.")
+    a = {
+        "value": "24581",
+        "source": SRC,
+        "page": n,
+        "quote": "Total debt 24,581 and current portion",
+    }
+    b = dict(a, quote="debt 24,581 and current portion 487")
+    lab = "total_debt fy-2024"
+
+    def run(parts: list[dict[str, Any]], value: str) -> list[str]:
+        row = {"field": "total_debt", "period": "fy-2024", "value": value, "derived": parts}
+        return compute(block([row], ["fy-2024"]), pages.root)[1]
+
+    assert run([a, b], "49162") == [f"{lab} component 1: repeats the citation of component 0"]
+    other = dict(b, value="487", quote="current portion 487 at year end")
+    assert run([a, other], "25068") == []
 
 
 def test_non_dict_block_still_reports_numbers(tmp_path: Path) -> None:

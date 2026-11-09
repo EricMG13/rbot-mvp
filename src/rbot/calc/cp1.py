@@ -42,6 +42,7 @@ _NUMBER_TOKEN = re.compile(r"(?<![0-9.])[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?(?![0-9
 _NIL_MARKER = re.compile(r"(?:^|\s)[\u2014\u2013-](?:\s|$)")
 _PAREN_BEFORE = re.compile(r"\$?\(\$?$")
 _MINUS_BEFORE = re.compile(r"(?:^|[^0-9A-Za-z])[-\u2212]\$?$")
+_EBITDA = frozenset(("ebitda", "adjusted_ebitda"))
 _MIN_QUOTE = 12
 _FOUR_DP = Decimal("0.0001")
 _RATIOS = ("gross_leverage", "net_leverage", "interest_cover", "liquidity")
@@ -94,18 +95,27 @@ def _printed_negative(quote: str, token: re.Match[str]) -> bool:
     return bool(in_parens or _MINUS_BEFORE.search(before))
 
 
-def _supported(value: Decimal, text: str, quote: str) -> bool:
-    """Whether `quote` prints `value` as one whole number token, with its sign."""
+def _supported(value: Decimal, text: str, quote: str, *, unsigned_only: bool) -> bool:
+    """Whether `quote` (normalised) prints `value` as one whole number token, with its sign.
+
+    A negative value needs a token printed negative. A positive value may match a parenthesised
+    token, except where `unsigned_only` (EBITDA: parentheses there mean a loss). A zero may also
+    match a standalone nil marker when the quote has no other number.
+    """
     digits = text.removeprefix("-")
-    for token in _NUMBER_TOKEN.finditer(quote):
-        if token.group().replace(",", "") == digits and (
-            value >= 0 or _printed_negative(quote, token)
-        ):
+    tokens = list(_NUMBER_TOKEN.finditer(quote))
+    for token in tokens:
+        if token.group().replace(",", "") != digits:
+            continue
+        negative = _printed_negative(quote, token)
+        if (value < 0 and negative) or (value >= 0 and not (unsigned_only and negative)):
             return True
-    return digits == "0" and bool(_NIL_MARKER.search(quote))
+    return digits == "0" and not tokens and bool(_NIL_MARKER.search(quote))
 
 
-def _citation_finding(item: Row, value: Decimal, source_text: Path) -> str | None:
+def _citation_finding(
+    item: Row, value: Decimal, source_text: Path, unsigned_only: bool
+) -> str | None:
     source, page, quote = item.get("source"), item.get("page"), item.get("quote")
     if not isinstance(source, str) or not source:
         return "source must be a non-empty string"
@@ -115,29 +125,31 @@ def _citation_finding(item: Row, value: Decimal, source_text: Path) -> str | Non
         return f"quote must be a string of at least {_MIN_QUOTE} characters"
     if finding := verify_quote(quote, source, page, source_text):
         return finding
-    if not _supported(value, str(item["value"]).strip(), quote):
-        return f"value {str(item['value']).strip()!r} is not printed as one number in the quote"
+    text = str(item["value"]).strip()
+    if not _supported(value, text, normalise(quote), unsigned_only=unsigned_only):
+        return f"value {text!r} is not printed as one number in the quote"
     return None
 
 
-def _cited(item: Row, label: str, source_text: Path) -> tuple[Decimal | None, list[str]]:
+def _cited(
+    item: Row, label: str, source_text: Path, unsigned_only: bool
+) -> tuple[Decimal | None, list[str]]:
     """Value of one sourced item, or None with findings."""
     value = _decimal(item.get("value"), label)
     if isinstance(value, str):
         return None, [value]
-    if finding := _citation_finding(item, value, source_text):
+    if finding := _citation_finding(item, value, source_text, unsigned_only):
         return None, [f"{label}: {finding}"]
     return value, []
 
 
 def _citation_key(part: Row) -> tuple[str, str, str]:
-    quote = part.get("quote")
-    shown = normalise(quote) if isinstance(quote, str) else repr(quote)
-    return repr(part.get("source")), repr(part.get("page")), shown
+    """Same source, page and value: the same printed figure, however the quotes differ."""
+    return repr(part.get("source")), repr(part.get("page")), str(part.get("value")).strip()
 
 
 def _derived(
-    derived: object, row: Row, label: str, source_text: Path
+    derived: object, row: Row, label: str, source_text: Path, unsigned_only: bool
 ) -> tuple[Decimal | None, list[str]]:
     if not isinstance(derived, list) or len(derived) < 2:
         return None, [f"{label}: derived must list at least two components"]
@@ -151,7 +163,7 @@ def _derived(
         first = cited.setdefault(_citation_key(part), i)
         if first != i:
             findings.append(f"{label} component {i}: repeats the citation of component {first}")
-        value, found = _cited(part, f"{label} component {i}", source_text)
+        value, found = _cited(part, f"{label} component {i}", source_text, unsigned_only)
         findings += found
         if value is not None:
             values.append(value)
@@ -164,12 +176,14 @@ def _derived(
 
 
 def _row_value(row: Row, label: str, source_text: Path) -> tuple[Decimal | None, list[str]]:
+    field = row.get("field")
+    unsigned_only = isinstance(field, str) and field in _EBITDA
     derived = row.get("derived")
     if derived is None:
-        return _cited(row, label, source_text)
+        return _cited(row, label, source_text, unsigned_only)
     if "source" in row or "quote" in row or "page" in row:
         return None, [f"{label}: row is both sourced and derived"]
-    return _derived(derived, row, label, source_text)
+    return _derived(derived, row, label, source_text, unsigned_only)
 
 
 def _row(row: Row, index: int, source_text: Path) -> tuple[Decimal | None, list[str]]:
