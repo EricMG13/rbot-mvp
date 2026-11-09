@@ -6,7 +6,7 @@ body {
   font: var(--rb-fs-body)/var(--rb-lh-body) var(--rb-font-text);
 }
 .doc {
-  max-width: 50rem; margin: var(--rb-s-7) auto; padding: var(--rb-s-7) 36px;
+  max-width: 50rem; margin: var(--rb-s-7) auto; padding: var(--rb-s-7) calc(var(--rb-s-7) + var(--rb-s-5));
   background: var(--rb-panel); border: 1px solid var(--rb-rule);
 }
 .cover { padding-bottom: var(--rb-s-6); border-bottom: 3px solid var(--rb-navy); }
@@ -49,6 +49,7 @@ tbody tr:nth-child(even) td { background: var(--rb-head); }
   background: var(--rb-caut-tint); color: var(--rb-caut); border-radius: var(--rb-r-tag);
   font: 500 var(--rb-fs-micro)/1.6 var(--rb-font-mono);
 }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
 .muted { color: var(--rb-ink-3); }
 .gaps li { list-style: none; margin-left: calc(-1 * var(--rb-s-7)); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
@@ -56,7 +57,7 @@ tbody tr:nth-child(even) td { background: var(--rb-head); }
 @media print {
   @page { margin: 16mm; }
   html, body { background: var(--rb-panel); }
-  body { font-size: 11pt; }
+  body { font-size: var(--rb-fs-body); }
   .doc { max-width: none; margin: 0; padding: 0; border: 0; }
   section { break-inside: auto; }
   h2, h3, h4 { break-after: avoid; }

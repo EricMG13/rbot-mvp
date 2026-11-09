@@ -84,7 +84,88 @@ def test_cover_sections_sources_gaps(work: Path) -> None:
 
 def test_missing_context_renders_dash(work: Path) -> None:
     out = render(work, {}, MODULES).read_text(encoding="utf-8")
-    assert "—" in out and "<h1>" in out
+    assert "<h1>—</h1>" in out
+    assert "<dt>As of</dt><dd>—</dd>" in out
+    assert "<dt>Pathway</dt><dd>—</dd>" in out
+
+
+def test_flat_context_keys(work: Path) -> None:
+    ctx = {"identity.issuer_name": "Flat Co", "run.as_of": "2025-12-31", "run.pathway": "quick"}
+    out = render(work, ctx, MODULES).read_text(encoding="utf-8")
+    assert "<h1>Flat Co</h1>" in out
+    assert "<dt>As of</dt><dd>2025-12-31</dd>" in out
+    assert "<dt>Pathway</dt><dd>quick</dd>" in out
+
+
+def gaps_of(work: Path, gaps: str) -> str:
+    (work / "handoffs" / "MOD_A.md").write_text(handoff("A", gaps), encoding="utf-8", newline="\n")
+    out = html_of(work)
+    return out[out.index('id="gaps"') :]
+
+
+def test_gaps_collected(work: Path) -> None:
+    para = gaps_of(work, "Only p.43 was reviewed; no broader context.")
+    assert "No gaps reported" not in para and "Only p.43 was reviewed" in para
+    assert para.count('class="tag">MOD_A') == 1
+    runs = gaps_of(work, "first run\nsecond line\n\nsecond run")
+    assert "first run second line</li>" in runs and "second run</li>" in runs
+    cont = gaps_of(work, "- item one\n  continued detail\n1. numbered\n   more")
+    assert "item one continued detail</li>" in cont and "numbered more</li>" in cont
+
+
+@pytest.mark.parametrize("text", ["None.", "none", "- No gaps.", "N/A", "No gaps", "- n/a."])
+def test_gaps_none_means_empty(work: Path, text: str) -> None:
+    (work / "handoffs" / "MOD_B.md").unlink()
+    assert "No gaps reported" in gaps_of(work, text)
+
+
+def test_gaps_ignores_fenced_and_other_sections(work: Path) -> None:
+    out = gaps_of(work, "- real gap\n```\n- fenced\n```")
+    assert "real gap" in out and "fenced" not in out
+
+
+def test_gaps_line_grammar_matches_checker(work: Path) -> None:
+    out = gaps_of(work, "- kept\u2028  wrapped")
+    assert "kept wrapped</li>" in out
+
+
+def test_logo_rejected_cases(work: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "brand").mkdir()
+    logo = tmp_path / "brand" / "logo.png"
+    logo.write_bytes(b"not a png")
+    assert 'class="wordmark"' in html_of(work)
+    logo.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * (512 * 1024))
+    assert 'class="wordmark"' in html_of(work)
+    logo.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 100)
+    assert 'class="logo"' in html_of(work)
+    (tmp_path / "brand" / "logo.svg").write_bytes(b"  \n<?xml version='1.0'?><svg/>")
+    assert "image/svg+xml" in html_of(work)
+    (tmp_path / "brand" / "logo.svg").write_bytes(b"-----BEGIN KEY-----")
+    assert "image/svg+xml" not in html_of(work)
+
+
+def test_symlinked_logo_refused(
+    work: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "brand").mkdir()
+    target = tmp_path / "real.png"
+    target.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 10)
+    try:
+        (tmp_path / "brand" / "logo.png").symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    assert 'class="wordmark"' in html_of(work)
+
+
+def test_lone_surrogate_and_bidi_in_context(work: Path) -> None:
+    first = render(work, {}, MODULES).read_text(encoding="utf-8")
+    ctx = {"identity": {"issuer_name": "Acme \ud800 \u202e<b>\u2066 x\u200b"}}
+    out = render(work, ctx, MODULES).read_text(encoding="utf-8")
+    assert "<h1>Acme \ufffd \ufffd&lt;b&gt;\ufffd x\u200b</h1>" in out
+    assert first != out
+    assert not list(work.glob("*.tmp"))
 
 
 def test_logo_override(work: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,7 +179,7 @@ def test_logo_override(work: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert 'class="wordmark"' not in out
     assert "<svg" not in out and "<script" not in out.lower()
     (tmp_path / "brand" / "logo.svg").unlink()
-    (tmp_path / "brand" / "logo.png").write_bytes(b"\x89PNG")
+    (tmp_path / "brand" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     assert "data:image/png;base64," in html_of(work)
 
 

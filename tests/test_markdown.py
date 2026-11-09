@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from rbot.markdown import to_html
@@ -62,3 +64,39 @@ def test_unclosed_fence_and_ragged_table() -> None:
     assert to_html("```\nx") == "<pre><code>x</code></pre>"
     out = to_html("| A | B |\n|---|---|\n| 1 |")
     assert "<td>1</td><td></td>" in out
+
+
+def test_indented_fence_is_text_like_the_checker() -> None:
+    out = to_html("```\n  ```\nquote [a.txt p.1]\n```")
+    assert "<pre><code>  ```\nquote [a.txt p.1]</code></pre>" in out
+    out = to_html("x ```\nplain")
+    assert "<pre>" not in out
+
+
+def test_line_splitter_is_the_checkers() -> None:
+    assert to_html("a\u2028b\u2028- c") == "<p>a b</p><ul><li>c</li></ul>"
+
+
+def test_headings_trim_closers() -> None:
+    assert to_html("## T ##") == "<h2>T</h2>"
+    assert to_html("# C#") == "<h1>C#</h1>"
+
+
+def test_right_aligned_columns_get_num_class() -> None:
+    out = to_html("| A | B |\n|:--|--:|\n| 1 | 2 |")
+    assert '<th>A</th><th class="num">B</th>' in out
+    assert '<td>1</td><td class="num">2</td>' in out
+
+
+@pytest.mark.parametrize(
+    "md",
+    ["# a" + " " * 16000 + "b", "[" * 16000, "| a |\n|-" + " " * 16000 + "x", "[a](" * 4000],
+)
+def test_no_superlinear_regex(md: str) -> None:
+    start = time.perf_counter()
+    to_html(md)
+    assert time.perf_counter() - start < 2
+
+
+def test_bidi_overrides_replaced() -> None:
+    assert to_html("a\u202eb\u2069c\u200bd") == "<p>a\ufffdb\ufffdc\u200bd</p>"
