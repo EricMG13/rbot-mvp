@@ -9,7 +9,7 @@ import html
 import re
 
 from rbot.handoff import BULLET as _BULLET
-from rbot.handoff import FENCE, split_lines
+from rbot.handoff import FENCE, HEADING, split_lines
 from rbot.handoff import NUMBER as _NUMBER
 
 _INLINE = re.compile(
@@ -18,7 +18,6 @@ _INLINE = re.compile(
     r"|\*(?P<em>[^*\s](?:[^*]*[^*\s])?)\*"
     r"|\[(?P<link>[^\][]{1,500})\]\([^)]{0,2000}\)"
 )
-_HEADING = re.compile(r"(#{1,4})\s+(.*)")
 _RULE_CELL = re.compile(r":?-+:?")
 _UNSAFE = re.compile("[\ud800-\udfff\u202a-\u202e\u2066-\u2069]")
 
@@ -134,7 +133,7 @@ def _starts_block(lines: list[str], i: int) -> bool:
     line = lines[i]
     return bool(
         FENCE.match(line)
-        or _HEADING.match(line.strip())
+        or HEADING.match(line.strip())
         or _BULLET.match(line.strip())
         or _NUMBER.match(line.strip())
         or _is_table_start(lines, i)
@@ -154,7 +153,7 @@ def to_html(md: str, shift: int = 0) -> str:
         elif FENCE.match(line):
             block, i = _code(lines, i)
             out.append(block)
-        elif (h := _HEADING.match(stripped)) is not None:
+        elif (h := HEADING.match(stripped)) is not None:
             level = min(len(h.group(1)) + shift, 6)
             out.append(f"<h{level}>{inline(_heading_text(h.group(2)))}</h{level}>")
             i += 1

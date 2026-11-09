@@ -302,3 +302,13 @@ def test_accepted_live_handoffs_still_pass(handoff: str, source_text: str, quote
     if not (md.is_file() and st_.is_dir()):
         pytest.skip("live case folder absent")
     assert check(md.read_text(encoding="utf-8"), st_, quoted_findings=quoted) == []
+
+
+@pytest.mark.parametrize("hashes", ["#####", "######"])
+def test_deep_hash_paragraph_is_a_finding_unit(tmp_path: Path, hashes: str) -> None:
+    root = pages(tmp_path, p0001=FOX)
+    quote = '"quick brown fox jumps" [x.htm p.1]'
+    out = check(
+        doc(f"- {quote}\n\n{hashes} Leverage is above 7x, unquoted."), root, quoted_findings=True
+    )
+    assert len(out) == 1 and "Findings item with no verified quote" in out[0]

@@ -23,7 +23,7 @@ _CITED_ONLY = (("‘", "’"), ("«", "»"), ("＂", "＂"), ("„", "“"))
 _CITE_TAIL = r"\s*\[([^\]]+?) p\.(\d+)\]"
 BULLET = re.compile(r"[-*]\s+(.*)")
 NUMBER = re.compile(r"\d+[.)]\s+(.*)")
-_UNIT_HEADING = re.compile(r"#{1,6}\s")
+HEADING = re.compile(r"(#{1,4})\s+(.*)")
 _PARAGRAPHS = re.compile(r"\n\s*\n")
 
 
@@ -212,7 +212,7 @@ def _paragraph_findings(
 def section_units(text: str, section: str) -> list[str]:
     """Items and paragraphs of `## <section>` outside fences, split as the renderer splits them.
 
-    A `-`/`*`/`1.` line starts an item that only indented lines continue; a `#{1,6}` heading or a
+    A `-`/`*`/`1.` line starts an item that only indented lines continue; a `#{1,4}` heading or a
     blank line or a fence ends the unit; any other line continues a paragraph or starts one.
     Each unit is its lines, stripped (item marker removed), joined by single spaces.
     """
@@ -226,7 +226,7 @@ def section_units(text: str, section: str) -> list[str]:
             in_section, current = heading.group(1) == section, None
         elif not in_section:
             continue
-        elif fenced or not line.strip() or _UNIT_HEADING.match(line.strip()):
+        elif fenced or not line.strip() or HEADING.match(line.strip()):
             current = None
         elif (item := item_text(line)) is not None:
             current, is_item = [item.strip()], True
