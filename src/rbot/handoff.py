@@ -105,6 +105,11 @@ def _page(source_text: Path, name: str, number: str) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
+def page_text(source: str, page: int, source_text: Path) -> str | None:
+    """The text of page `page` of `source`, or None where `verify_quote` finds no page."""
+    return _page(source_text, source, str(page))
+
+
 def _missing(source_text: Path, name: str) -> str:
     safe = name not in ("", ".", "..") and not any(c in name for c in "/\\\0")
     return "page not found on" if safe and (source_text / name).is_dir() else "unknown source"

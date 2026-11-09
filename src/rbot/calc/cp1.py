@@ -9,10 +9,12 @@ denominator of zero or below gives null plus a gap, as FW metrics.py:163-174 doe
 """
 
 import re
+from bisect import bisect_right
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from pathlib import Path
+from typing import NamedTuple
 
-from rbot.handoff import normalise, verify_quote
+from rbot.handoff import normalise, page_text, verify_quote
 
 FIELDS = (
     "revenue",
@@ -38,10 +40,15 @@ _VALUE = re.compile(r"-?[0-9]{1,15}(?:\.[0-9]{1,15})?")
 _MAX_SIGNIFICANT = 15
 _PRECISION = 38
 _MAX_DEPTH = 20
-_NUMBER_TOKEN = re.compile(r"(?<![0-9.])[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?(?![0-9])")
-_NIL_MARKER = re.compile(r"(?:^|\s)[\u2014\u2013-](?:\s|$)")
-_PAREN_BEFORE = re.compile(r"\$?\(\$?$")
-_MINUS_BEFORE = re.compile(r"(?:^|[^0-9A-Za-z])[-\u2212]\$?$")
+_FIGURE = re.compile(
+    r"(?P<nil>(?<!\S)[-−](?!\S))"
+    r"|(?P<open>\(\s*\$?\s*)?"
+    r"(?P<minus>(?<![0-9A-Za-z])[-−]\$?)?"
+    r"(?<![\d.,])(?P<run>\d+(?:[.,]\d+)*)"
+    r"(?P<close>\s*\))?"
+)
+_WELL_FORMED = re.compile(r"[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?")
+_DIGIT = re.compile(r"\d")
 _EBITDA = frozenset(("ebitda", "adjusted_ebitda"))
 _MIN_QUOTE = 12
 _FOUR_DP = Decimal("0.0001")
@@ -89,28 +96,75 @@ def _decimal(raw: object, label: str) -> Decimal | str:
     return Decimal(text)
 
 
-def _printed_negative(quote: str, token: re.Match[str]) -> bool:
-    before = quote[: token.start()]
-    in_parens = _PAREN_BEFORE.search(before) and quote[token.end() :].startswith(")")
-    return bool(in_parens or _MINUS_BEFORE.search(before))
+class _Figure(NamedTuple):
+    digits: str
+    negative: bool
+    bare: bool
 
 
-def _supported(value: Decimal, text: str, quote: str, *, unsigned_only: bool) -> bool:
-    """Whether `quote` (normalised) prints `value` as one whole number token, with its sign.
+def _occurrences(wanted: str, text: str) -> list[int]:
+    """Start offsets of every (overlapping) occurrence of `wanted` in `text`."""
+    starts: list[int] = []
+    at = text.find(wanted)
+    while at != -1:
+        starts.append(at)
+        at = text.find(wanted, at + 1)
+    return starts
 
-    A negative value needs a token printed negative. A positive value may match a parenthesised
-    token, except where `unsigned_only` (EBITDA: parentheses there mean a loss). A zero may also
-    match a standalone nil marker when the quote has no other number.
+
+def _inside(starts: list[int], span: tuple[int, int], length: int) -> bool:
+    """Whether `span` lies wholly within one occurrence (given by its start) of the quote."""
+    s, e = span
+    i = bisect_right(starts, s) - 1
+    return i >= 0 and e <= starts[i] + length
+
+
+def _figure(m: re.Match[str]) -> _Figure | None:
+    """The figure a run prints, or None when the run is not a well-formed number."""
+    run = m.group("run")
+    if not _WELL_FORMED.fullmatch(run):
+        return None
+    minus = m.group("minus") is not None
+    opened = m.group("open") is not None
+    negative = minus or (opened and m.group("close") is not None)
+    return _Figure(run.replace(",", ""), negative, not (minus or opened))
+
+
+def _figures(quote: str, page: str) -> tuple[list[_Figure], bool]:
+    """Figures the page prints inside the quote's occurrences, and whether a nil dash does.
+
+    The nil flag is true only when the quote itself holds no digit at all.
+    """
+    wanted = normalise(quote)
+    found: list[_Figure] = []
+    nil = False
+    for wrap in ("", "-"):
+        text = normalise(page, wrap)
+        starts = _occurrences(wanted, text)
+        if not starts:
+            continue
+        for m in _FIGURE.finditer(text):
+            if m.group("nil") is not None:
+                nil = nil or _inside(starts, m.span("nil"), len(wanted))
+            elif _inside(starts, m.span("run"), len(wanted)) and (fig := _figure(m)):
+                found.append(fig)
+    return found, nil and not _DIGIT.search(wanted)
+
+
+def _supported(
+    value: Decimal, text: str, figures: list[_Figure], nil: bool, *, unsigned_only: bool
+) -> bool:
+    """Whether the page prints `value` as one whole number, with its sign.
+
+    A negative value needs a figure printed negative. A positive value may match a parenthesised
+    figure, except where `unsigned_only` (EBITDA: parentheses there mean a loss). A zero may
+    also match a standalone nil dash when the quote has no digit.
     """
     digits = text.removeprefix("-")
-    tokens = list(_NUMBER_TOKEN.finditer(quote))
-    for token in tokens:
-        if token.group().replace(",", "") != digits:
-            continue
-        negative = _printed_negative(quote, token)
-        if (value < 0 and negative) or (value >= 0 and not (unsigned_only and negative)):
+    for f in figures:
+        if f.digits == digits and (f.negative if value < 0 else f.bare or not unsigned_only):
             return True
-    return digits == "0" and not tokens and bool(_NIL_MARKER.search(quote))
+    return digits == "0" and nil
 
 
 def _citation_finding(
@@ -126,7 +180,9 @@ def _citation_finding(
     if finding := verify_quote(quote, source, page, source_text):
         return finding
     text = str(item["value"]).strip()
-    if not _supported(value, text, normalise(quote), unsigned_only=unsigned_only):
+    # The page exists because verify_quote passed; an empty text would yield no figures (closed).
+    figures, nil = _figures(quote, page_text(source, page, source_text) or "")
+    if not _supported(value, text, figures, nil, unsigned_only=unsigned_only):
         return f"value {text!r} is not printed as one number in the quote"
     return None
 
@@ -144,8 +200,10 @@ def _cited(
 
 
 def _citation_key(part: Row) -> tuple[str, str, str]:
-    """Same source, page and value: the same printed figure, however the quotes differ."""
-    return repr(part.get("source")), repr(part.get("page")), str(part.get("value")).strip()
+    """Same source (any case), page and unsigned value: the same printed figure."""
+    source = part.get("source")
+    named = source.casefold() if isinstance(source, str) else source
+    return repr(named), repr(part.get("page")), str(part.get("value")).strip().removeprefix("-")
 
 
 def _derived(
