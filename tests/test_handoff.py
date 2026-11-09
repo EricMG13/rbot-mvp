@@ -177,3 +177,40 @@ def test_unpaired_short_cited_quote_and_paraphrase(tmp_path: Path) -> None:
 def test_spaced_dash_wrap() -> None:
     assert normalise("The company —\nnot the parent") == "The company - not the parent"
     assert normalise("The company—\nnot") == "The company-not"
+
+
+def quoted_pages(tmp_path: Path) -> Path:
+    return pages(tmp_path, p0001="The issuer is Acme Corp.", p0002="Revenue grew in fiscal 2024.")
+
+
+def test_quoted_findings_rejects_item_without_quote(tmp_path: Path) -> None:
+    root = quoted_pages(tmp_path)
+    text = doc('- "The issuer is Acme Corp." [x.htm p.1]\n- The cover page is on page 80.')
+    assert check(text, root) == []
+    out = check(text, root, quoted_findings=True)
+    assert len(out) == 1 and out[0].startswith("Findings item with no verified quote:")
+    assert "cover page" in out[0]
+
+
+def test_quoted_findings_rejects_paragraph_and_short_quote(tmp_path: Path) -> None:
+    root = quoted_pages(tmp_path)
+    text = doc('The issuer is Acme.\n\nShort "Acme" [x.htm p.1] only.')
+    out = check(text, root, quoted_findings=True)
+    assert sum(f.startswith("Findings item with no verified quote") for f in out) == 2
+
+
+def test_quoted_findings_rejects_quote_on_wrong_page(tmp_path: Path) -> None:
+    root = quoted_pages(tmp_path)
+    out = check(doc('- "The issuer is Acme Corp." [x.htm p.2]'), root, quoted_findings=True)
+    assert out and "not found" in out[0]
+
+
+def test_quoted_findings_accepts_fully_quoted(tmp_path: Path) -> None:
+    root = quoted_pages(tmp_path)
+    text = doc(
+        '- "The issuer is Acme Corp." [x.htm p.1]\n'
+        '- Growth: "Revenue grew in fiscal 2024." [x.htm p.2]\n'
+        "  continued line\n\n### Detail\n"
+        '1. "The issuer is Acme Corp." [x.htm p.1]\n```\nunquoted fenced line\n```'
+    )
+    assert check(text, root, quoted_findings=True) == []
