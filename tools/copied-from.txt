@@ -11,3 +11,4 @@ src/rbot/assets/fonts/RedHatMono-Medium.woff2 <- src/deploy_vii/assets/fonts/Red
 edited src/rbot/assets/shell.html <- src/deploy_vii/assets/shell.html
 edited src/rbot/pathways.py <- src/deploy_vii/contracts.py
 edited src/rbot/prompts/CP-0.md <- src/deploy_vii/methods/cp0.md
+edited src/rbot/prompts/CP-1.md <- prompts/CP-1.md

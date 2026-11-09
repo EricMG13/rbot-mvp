@@ -5,14 +5,15 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from rbot.calc import cp1
 from rbot.copilot import CallResult, SandboxViolation, call
-from rbot.handoff import check
+from rbot.handoff import check, json_block
 from rbot.pathways import IMPLEMENTED, PATHWAYS, PROMPTS_DIR
 from rbot.render import render
 from rbot.sources import SourceError, SourceText, scrub, write_source_text
@@ -190,9 +191,37 @@ def _log(work: Path, **entry: Any) -> None:
         f.write(line + "\n")
 
 
-def _findings(result: CallResult, text: str, source_text: Path) -> list[str]:
-    found = [VIOLATION.format(v) for v in result.violations]
-    return found + check(text, source_text, quoted_findings=True)
+type Calculator = Callable[[object, Path], tuple[dict[str, object], list[str]]]
+CALCULATORS: dict[str, Calculator] = {"CP-1": cp1.compute}
+CALC_PREFIX = "calculator: "
+CALC_RULE = (
+    "Each JSON row's quote must be copied from its cited page and print the row's value as one "
+    "number; fix or drop the row."
+)
+
+
+def _validate(
+    module: str, text: str, source_text: Path
+) -> tuple[list[str], dict[str, object] | None]:
+    """The checker's findings, then (only if there are none) the module's calculator's.
+
+    A module in CALCULATORS must carry its JSON block. Returns the findings and, when the handoff
+    is clean, the calculation (None for a module without a calculator)."""
+    calculator = CALCULATORS.get(module)
+    found = check(text, source_text, require_json=calculator is not None, quoted_findings=True)
+    if found or calculator is None:
+        return found, None
+    calc, calc_found = calculator(json_block(text), source_text)
+    if calc_found:
+        return [CALC_PREFIX + f for f in calc_found], None
+    return [], calc
+
+
+def _findings(
+    module: str, result: CallResult, text: str, source_text: Path
+) -> tuple[list[str], dict[str, object] | None]:
+    found, calc = _validate(module, text, source_text)
+    return [VIOLATION.format(v) for v in result.violations] + found, calc
 
 
 @dataclass(frozen=True)
@@ -210,8 +239,10 @@ def _log_best_effort(work: Path, err: BaseException, **entry: Any) -> None:
         err.add_note(f"run.log line not written: {log_err}")
 
 
-def _attempt(module: str, n: int, prompt: str, setup: Setup) -> tuple[str, list[str]]:
-    """One call plus validation. Returns (handoff text, findings); logs the attempt."""
+def _attempt(
+    module: str, n: int, prompt: str, setup: Setup
+) -> tuple[str, list[str], dict[str, object] | None]:
+    """One call plus validation. Returns (handoff text, findings, calculation); logs the attempt."""
     log: dict[str, Any] = {
         "module": module,
         "attempt": n,
@@ -233,20 +264,20 @@ def _attempt(module: str, n: int, prompt: str, setup: Setup) -> tuple[str, list[
 
 def _attempt_once(
     module: str, n: int, prompt: str, setup: Setup, log: dict[str, Any]
-) -> tuple[str, list[str]]:
+) -> tuple[str, list[str], dict[str, object] | None]:
     work = setup.work
     adir = work / "attempts" / module / str(n)
     if adir.exists():
         shutil.rmtree(adir)
     result = call(prompt, cwd=work, attempt_dir=adir, gh=setup.gh, **setup.settings)
     text = scrub(result.text)
-    findings = _findings(result, text, work / "source-text")
+    findings, calc = _findings(module, result, text, work / "source-text")
     log.update(model=result.model, exit=result.exit_code, seconds=round(result.seconds, 3))
     log["credits"] = result.credits
     _write(adir / "handoff.md", text)
     _write(adir / "findings.txt", scrub("\n".join(findings)))
     _log(work, **log, outcome="findings" if findings else "accepted", findings=findings)
-    return text, findings
+    return text, findings, calc
 
 
 NO_CITATION = "no citation right after it"
@@ -262,12 +293,18 @@ GREP_RULE = (
 )
 
 
-def _accepted(handoff: Path, fp: Path, fingerprint: str, source_text: Path) -> bool:
-    """A stored handoff is trusted only if its fingerprint matches and the checker still passes."""
+def _accepted(
+    module: str, handoff: Path, fp: Path, fingerprint: str, source_text: Path
+) -> tuple[bool, dict[str, object] | None]:
+    """Whether a stored handoff is trusted, and its calculation (re-run now, not stored).
+
+    Trusted only if its fingerprint matches and the checker and the module's calculator still pass.
+    """
     if not (handoff.is_file() and fp.is_file() and _read(fp).strip() == fingerprint):
-        return False
+        return False, None
     stored = handoff.read_text(encoding="utf-8", errors="replace")
-    return not check(stored, source_text, quoted_findings=True)
+    findings, calc = _validate(module, stored, source_text)
+    return not findings, calc
 
 
 HANDOFF_INTRO = (
@@ -283,12 +320,22 @@ def _fenced(text: str) -> str:
     return f"{fence}markdown\n{text}\n{fence}"
 
 
+def _write_calculation(path: Path, calc: dict[str, object] | None) -> None:
+    if calc is not None:
+        _write_atomic(path, json.dumps(calc, indent=2, sort_keys=True))
+
+
 def _run_module(module: str, prompt: str, setup: Setup) -> None:
     work = setup.work
     fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     handoff, fp = work / "handoffs" / f"{module}.md", work / "handoffs" / f"{module}.fp"
-    if _accepted(handoff, fp, fingerprint, work / "source-text"):
+    calculation = work / "calculation.json"
+    trusted, calc = _accepted(module, handoff, fp, fingerprint, work / "source-text")
+    if trusted:
+        _write_calculation(calculation, calc)  # a calculator fix applies without a model call
         return
+    if module in CALCULATORS:
+        calculation.unlink(missing_ok=True)  # never a calculation that outlives its handoff
     findings: list[str] = []
     text = ""
     for n in range(1, ATTEMPTS + 1):
@@ -297,17 +344,19 @@ def _run_module(module: str, prompt: str, setup: Setup) -> None:
             rules = [CITATION_RULE] * any(NO_CITATION in f for f in findings)
             rules += [QUOTE_RULE] * any(NO_QUOTE in f for f in findings)
             rules += [GREP_RULE] * any(NOT_FOUND in f for f in findings)
+            rules += [CALC_RULE] * any(f.startswith(CALC_PREFIX) for f in findings)
             rule = "".join(f"\n{r}\n" for r in rules)
             text_prompt += (
                 f"\n\n## Your previous handoff\n\n{HANDOFF_INTRO}\n\n{_fenced(text)}"
                 "\n\n## Findings from your previous attempt\n\nFix every item and reply with the "
                 f"complete handoff again:{rule}\n" + "\n".join(f"- {f}" for f in findings)
             )
-        text, findings = _attempt(module, n, text_prompt, setup)
+        text, findings, calc = _attempt(module, n, text_prompt, setup)
         if not findings:
             fp.unlink(missing_ok=True)  # never a matching .fp beside a half-written .md
             _write_atomic(handoff, text)
             _write_atomic(fp, fingerprint)
+            _write_calculation(calculation, calc)
             return
     raise ModuleFailed(module, findings)
 
