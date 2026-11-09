@@ -65,3 +65,25 @@ tbody tr:nth-child(even) td { background: var(--rb-head); }
   .cover, .wordmark, thead th, .tag { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .toc a { color: var(--rb-ink); }
 }
+/* Charts: edited from final-workflow src/deploy_vii/assets/app.css lines 210-230 at fda70c29. */
+.chart-figure { margin: 0 0 var(--rb-s-5); }
+.chart { display: block; max-width: 100%; height: auto; overflow: visible; font-family: var(--rb-font-text); }
+.chart text { font-size: 11px; fill: var(--rb-ink-2); font-variant-numeric: tabular-nums; }
+.chart .lb { fill: var(--rb-ink); font-weight: 600; }
+.chart .na { font-style: italic; }
+.chart .grid { stroke: var(--rb-ch-grid); stroke-width: 1; }
+.chart .zero { stroke: var(--rb-ink-2); }
+.chart .ln { fill: none; stroke-width: 2; }
+.chart .pt { stroke-width: 1.5; }
+.chart .k1 { stroke: var(--rb-ch-1); } .chart .k2 { stroke: var(--rb-ch-2); } .chart .k3 { stroke: var(--rb-ch-3); }
+.chart .k4 { stroke: var(--rb-ch-4); } .chart .k5 { stroke: var(--rb-ch-5); }
+.chart .f1 { fill: var(--rb-ch-1); } .chart .f2 { fill: var(--rb-ch-2); } .chart .f3 { fill: var(--rb-ch-3); }
+.chart .f4 { fill: var(--rb-ch-4); } .chart .f5 { fill: var(--rb-ch-5); }
+.chart .s1 { fill: var(--rb-ch-1); stroke: var(--rb-ch-1); } .chart .s2 { fill: var(--rb-ch-2); stroke: var(--rb-ch-2); }
+.chart .s3 { fill: var(--rb-ch-3); stroke: var(--rb-ch-3); } .chart .s4 { fill: var(--rb-ch-4); stroke: var(--rb-ch-4); }
+.chart .s5 { fill: var(--rb-ch-5); stroke: var(--rb-ch-5); }
+.chart .na-box { fill: var(--rb-ch-track); stroke: var(--rb-ch-grid); stroke-dasharray: 4 3; }
+.legend { display: flex; flex-wrap: wrap; gap: var(--rb-s-1) var(--rb-s-4); font-size: var(--rb-fs-micro); color: var(--rb-ink-2); }
+.legend .sw { display: inline-block; width: 9px; height: 9px; margin-right: var(--rb-s-1); vertical-align: -1px; }
+.sw1 { background: var(--rb-ch-1); } .sw2 { background: var(--rb-ch-2); } .sw3 { background: var(--rb-ch-3); }
+.sw4 { background: var(--rb-ch-4); } .sw5 { background: var(--rb-ch-5); }

@@ -158,6 +158,8 @@ confirm each page with your grep tool before you rely on it, and cite only pages
   Findings counts as one item; put its quote and citation in the table row or directly after it, and
   give each number its own quote where it matters. Conclusions with no quote (readiness, restriction
   judgments) go in `## Next module`, not in Findings.
+  Statements of unit, sign convention, method or basis that carry no quote go in the note under the
+  `json` block in `## Calculations` or in `## Sources`, never in Findings.
 - `## Calculations`: exactly one fenced `json` block (see below), the one the calculator reads, and
   then at most a short note on what was derived. No second `json` block anywhere in the section.
 - `## Gaps`: a bulleted list, one item per gap. Each item gives an identifier, the affected work
@@ -190,11 +192,17 @@ Field list (`field` is one of): `revenue`, `ebitda`, `adjusted_ebitda`, `interes
 
 Rules:
 
+- The block must parse as JSON: one object whose `rows` list is closed once, by `]}`. Check the
+  closing brackets before you reply.
 - Every `value` is a JSON string, written as plain digits with an optional minus sign and decimal
   point (`"25068"`, `"-211"`, `"6.5"`), in the block's `unit`. `page` is a JSON integer. No other
   number appears as a JSON number. Each row's `quote` is copied verbatim from the cited page
   (12 or more characters) and contains the row's digits: the value, printed as one number, with its
   thousands separators as printed. A figure printed in parentheses may support a negative value.
+  Copy each row's quote from the line that prints that period's value. A comparative period's table
+  can label the same line differently (often shorter) than the current period's table: never carry
+  one period's label into another period's quote. Confirm each quote with grep on the cited page
+  file before you reply.
 - `source` is the source file name exactly as listed; `page` is the page file's number.
 - A row is either sourced (`value`, `source`, `page`, `quote`) or derived (`value` and `derived`, a
   list of at least two components, each with `value`, `source`, `page` and `quote`). A derived

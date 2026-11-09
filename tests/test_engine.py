@@ -954,6 +954,9 @@ def test_cp1_is_implemented_and_prompt_keeps_the_amendments() -> None:
         "cash-flow quality, liquidity, data quality, definition risks, key gaps",
         "non-debt liability detail line",
         "every sourced value and every derived component",
+        "carry no quote go in the note under the `json` block",
+        "never carry one period's label into another period's quote",
+        "the block must parse as json: one object whose `rows` list is closed once, by `]}`",
     ):
         assert phrase in text, phrase
     for field in cp1.FIELDS:
