@@ -4,11 +4,12 @@ Only real comments count (tokenize), so strings that merely contain a marker are
 """
 
 import io
+import re
 import sys
 import tokenize
 from pathlib import Path
 
-MARKERS = ("noqa", "type: ignore", "nosec", "pragma: no cover")
+MARKER = re.compile(r"noqa|type:\s*ignore|nosec|pragma:?\s*no\s*cover", re.IGNORECASE)
 ROOTS = ("src", "tools")
 BASELINE = "tools/suppressions-baseline.txt"
 
@@ -19,7 +20,7 @@ def count(root: Path) -> int:
         for path in sorted((root / sub).rglob("*.py")):
             text = path.read_text(encoding="utf-8")
             for tok in tokenize.generate_tokens(io.StringIO(text).readline):
-                if tok.type == tokenize.COMMENT and any(m in tok.string for m in MARKERS):
+                if tok.type == tokenize.COMMENT and MARKER.search(tok.string):
                     total += 1
     return total
 

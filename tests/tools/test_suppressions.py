@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from tools import suppressions
 
 
@@ -23,3 +25,19 @@ def test_suppression_at_baseline_passes(tmp_path: Path) -> None:
 def test_string_is_not_a_suppression(tmp_path: Path) -> None:
     _setup(tmp_path, 's = "# noqa"\n', "0\n")
     assert suppressions.main(tmp_path) == 0
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "# type:ignore",
+        "# NOQA",
+        "# pragma:no cover",
+        "# PRAGMA: NO COVER",
+        "# Nosec",
+        "# type:  ignore",
+    ],
+)
+def test_variants_count(tmp_path: Path, comment: str) -> None:
+    _setup(tmp_path, f"x = 1  {comment}\n", "0\n")
+    assert suppressions.main(tmp_path) == 1

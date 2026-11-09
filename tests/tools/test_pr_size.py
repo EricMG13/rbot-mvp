@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from tools import pr_size
 
 
@@ -71,3 +73,32 @@ def test_changed_copy_is_a_mismatch(tmp_path: Path) -> None:
         {"b/y.py": "two\n", "tools/copied-from.txt": f"source {sha}\nb/y.py <- a/x.py\n"},
     )
     assert pr_size.copied_mismatches(repo / pr_size.LISTING, repo) == ["b/y.py"]
+
+
+def test_edited_row_missing_src_names_dest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _init(tmp_path)
+    sha = _commit(repo, {"a/x.py": "x\n"})
+    _commit(
+        repo,
+        {"b/y.py": "y\n", "tools/copied-from.txt": f"source {sha}\nedited b/y.py <- a/gone.py\n"},
+    )
+    monkeypatch.chdir(repo)
+    assert pr_size.main(["--base", sha]) == 1
+    assert "copy mismatch: b/y.py" in capsys.readouterr().out
+
+
+def test_malformed_row_rejected() -> None:
+    with pytest.raises(ValueError, match="row must be"):
+        pr_size._parse_listing(f"source {'a' * 40}\nb/y.py\n", "l")
+
+
+def test_crlf_listing_parses() -> None:
+    text = f"source {'a' * 40}\r\nb/y.py <- a/x.py\r\nedited c.py <- d.py\r\n"
+    assert pr_size._parse_listing(text, "l") == ("a" * 40, {"b/y.py": "a/x.py"}, {"c.py": "d.py"})
+
+
+def test_uppercase_sha_rejected() -> None:
+    with pytest.raises(ValueError, match="first line"):
+        pr_size._parse_listing(f"source {'A' * 40}\n", "l")

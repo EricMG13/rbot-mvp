@@ -23,7 +23,7 @@ LIMIT = 800
 LISTING = "tools/copied-from.txt"
 SKIP_PREFIXES = ("tests/fixtures/", "tests/oracles/")
 LOCKFILE = "uv.lock"
-SOURCE_LINE = re.compile(r"source ([0-9a-fA-F]{40})")
+SOURCE_LINE = re.compile(r"source ([0-9a-f]{40})")
 EDITED_PREFIX = "edited "
 ARROW = " <- "
 FWPY_PREFIX = "fwpy:"
@@ -166,6 +166,10 @@ def main(argv: list[str] | None = None) -> int:
         top = _git(Path.cwd(), "rev-parse", "--show-toplevel").decode("utf-8").strip()
         repo = Path(top)
         mismatches = copied_mismatches(repo / LISTING, repo)
+        if mismatches:
+            for path in mismatches:
+                print(f"copy mismatch: {path}")
+            return 1
         total = pr_lines(args.base, repo)
     except ValueError as err:
         print(err, file=sys.stderr)
@@ -175,9 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"git failed: {shlex.join(map(str, err.cmd))}: {detail}", file=sys.stderr)
         return 1
     print(f"counted lines: {total} (limit {LIMIT})")
-    for path in mismatches:
-        print(f"copy mismatch: {path}")
-    return 1 if mismatches or total > LIMIT else 0
+    return 1 if total > LIMIT else 0
 
 
 if __name__ == "__main__":
