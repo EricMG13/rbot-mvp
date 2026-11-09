@@ -7,7 +7,8 @@ listing and the files are read from commits), not the working tree.
 
 Listing format: first line ``source <40-hex sha>``, then one row per copied file:
 ``<rbot path> <- <source path>`` (byte-identical, counts 0 lines) or
-``edited <rbot path> <- <source path>`` (counts only its difference from the source). A source
+``edited <rbot path> <- <source path>`` (counts only the lines it adds
+to the source; trimmed-away source lines are not new code). A source
 path with the prefix ``fwpy:`` is not fetched in CI, so that row counts as new lines. A listing
 with no non-blank lines means "no copies".
 """
@@ -128,7 +129,7 @@ def _is_excluded(path: str) -> bool:
 
 
 def _edit_lines(repo: Path, sha: str, src: str, dest: str) -> int | None:
-    """Added plus deleted lines of one file, HEAD against the source commit.
+    """Lines added to one file, HEAD against the source commit (deletions do not count).
 
     None when git reports the file binary (either side), so the caller keeps its range count.
     """
@@ -138,7 +139,7 @@ def _edit_lines(repo: Path, sha: str, src: str, dest: str) -> int | None:
         return 0
     out = _git(repo, "diff", "--numstat", "--no-renames", old, new)
     added, deleted, _ = out.decode("utf-8").split("\t", 2)
-    return None if added == "-" or deleted == "-" else int(added) + int(deleted)
+    return None if added == "-" or deleted == "-" else int(added)
 
 
 def pr_lines(base: str, repo: Path) -> int:
