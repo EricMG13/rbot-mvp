@@ -51,7 +51,7 @@ def test_mapped_edit_counts_diff(tmp_path: Path) -> None:
             "tools/copied-from.txt": f"source {sha}\nedited b/y.py <- a/x.py\n",
         },
     )
-    assert pr_size.pr_lines(sha, repo) == 2
+    assert pr_size.pr_lines(sha, repo) == 1
 
 
 def test_fwpy_row_counts_as_new_lines(tmp_path: Path) -> None:
@@ -102,3 +102,17 @@ def test_crlf_listing_parses() -> None:
 def test_uppercase_sha_rejected() -> None:
     with pytest.raises(ValueError, match="first line"):
         pr_size._parse_listing(f"source {'A' * 40}\n", "l")
+
+
+def test_trimmed_edit_counts_added_only(tmp_path: Path) -> None:
+    repo = _init(tmp_path)
+    src = "".join(f"line{i}\n" for i in range(10))
+    sha = _commit(repo, {"a/x.py": src})
+    _commit(
+        repo,
+        {
+            "b/y.py": "line0\nline1\nnew\n",
+            "tools/copied-from.txt": f"source {sha}\nedited b/y.py <- a/x.py\n",
+        },
+    )
+    assert pr_size.pr_lines(sha, repo) == 1
