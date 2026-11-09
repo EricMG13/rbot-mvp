@@ -1,7 +1,7 @@
 # Copilot CLI, pinned from live runs (2026-11-09)
 
 Tool: `gh` 2.101 running Copilot CLI 1.0.105. Probe: `python3 tools/copilot_probe.py --out DIR [--model M] [--effort E] [--available-tools a,b] [--only n,...]`.
-Fixtures: `tests/fixtures/copilot/handoff-events.jsonl`, `write-attempt-events.jsonl`, `escape-attempt-events.jsonl` (real, captured through `rbot.copilot.call()` with RBOT's own argv including `--available-tools view,grep,glob` and the `--deny-tool` flags: the model used only `view`/`glob`/`grep`, no `bash`; reads outside the work folder came back `denied`; `session.info` shows the Disabled tools line; streamed fragments are redacted and kept in the first fragment of each call), plus `synthetic-forbidden-tool-events.jsonl` (hand-built, NOT a live capture: a `create` tool call) (paths and user name redacted; the opaque `apiCallId` blobs also redacted because gitleaks flags them).
+Fixtures: `tests/fixtures/copilot/handoff-events.jsonl`, `write-attempt-events.jsonl`, `escape-attempt-events.jsonl` (real, captured through `rbot.copilot.call()` with RBOT's own argv including `--available-tools view,grep,glob` and the `--deny-tool` flags: the model used only `view`/`glob`/`grep`, no `bash`; reads outside the work folder came back `denied`; `session.info` shows the Disabled tools line; streamed fragments are redacted and kept in the first fragment of each call), plus `rg-alias-events.jsonl` (trimmed live capture, 2026-11-09, `gpt-6-luna`: one `rg` call, short result and final text, opaque blobs and user paths redacted), plus `synthetic-forbidden-tool-events.jsonl` (hand-built, NOT a live capture: a `create` tool call) (paths and user name redacted; the opaque `apiCallId` blobs also redacted because gitleaks flags them).
 
 ## Deviation from the plan: the pinned model is not available
 
@@ -23,6 +23,8 @@ Prompt-file handoff works: `-p "Read the file prompt.md in the current folder wi
 
 Unrestricted `tools` call lists 23 names: `bash read_bash stop_bash list_bash view create edit web_fetch fetch_copilot_cli_documentation search_code_subagent semantic_code_search skill run_dynamic_workflow dynamic_workflows_manage sql session_store_sql read_agent list_agents write_agent grep glob task parallel` (the model's own listing; `search_code_subagent` and `parallel` are not in the "Disabled tools" list below, so they are model-visible names, not confirmed tools).
 Read-only: `view`, `grep`, `glob`. `--available-tools view,grep,glob` works: the stream's `session.info` event says `Disabled tools: bash, create, dynamic_workflows_manage, edit, fetch_copilot_cli_documentation, list_agents, list_bash, read_agent, read_bash, run_dynamic_workflow, semantic_code_search, session_store_sql, skill, sql, stop_bash, task, web_fetch, write_agent`. (I did not re-run the `tools` listing with the restriction on; the evidence is the `session.info` event and (e).)
+
+Under GPT-family routing (`gpt-6-luna`, live 2026-11-09) the grep tool appears as `rg` with the same arguments (`pattern`, `paths`, `glob`, `output_mode`, `-n`, `head_limit`; toolTitle "Searching files") while `session.info` still shows the identical Disabled tools line. RBOT accepts `rg` by name in the event checks only (`ACCEPTED_TOOL_NAMES`); `--available-tools` stays `view,grep,glob`. Any other name is still a violation.
 
 ## (c) Event types and fields
 

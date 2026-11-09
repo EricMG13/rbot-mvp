@@ -8,6 +8,7 @@ import pytest
 
 from rbot import __main__ as cli
 from rbot import engine, sources
+from rbot.calc import cp1
 from rbot.copilot import CallResult, SandboxViolation
 from rbot.engine import ContextError, ModuleFailed, run_case
 from rbot.pathways import IMPLEMENTED, PATHWAYS, PROMPTS_DIR
@@ -91,9 +92,21 @@ class Case:
         return [json.loads(x) for x in text.splitlines()]
 
 
+@pytest.fixture(autouse=True)
+def cp0_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most tests script one module; the CP-1 tests use the `case1` fixture to run both."""
+    monkeypatch.setattr(engine, "IMPLEMENTED", frozenset({"CP-0"}))
+
+
 @pytest.fixture
 def case(tmp_path: Path) -> Case:
     return Case(tmp_path)
+
+
+@pytest.fixture
+def case1(case: Case, monkeypatch: pytest.MonkeyPatch) -> Case:
+    monkeypatch.setattr(engine, "IMPLEMENTED", IMPLEMENTED)
+    return case
 
 
 def test_run_case_writes_handoff_and_report(case: Case) -> None:
@@ -211,11 +224,11 @@ def test_upstream_handoff_is_listed_in_the_next_prompt(case: Case, tmp_path: Pat
     prompts.mkdir()
     for p in PROMPTS_DIR.glob("*.md"):
         (prompts / p.name).write_bytes(p.read_bytes())
-    (prompts / "CP-1.md").write_text("# CP-1 test module\n", encoding="utf-8")
+    (prompts / "CP-MODEL.md").write_text("# test module\n", encoding="utf-8")
     gh = case.script(events(VALID), events(VALID))
-    run_case(case.case, case.work, gh=gh, modules=["CP-0", "CP-1"], prompts=prompts)
+    run_case(case.case, case.work, gh=gh, modules=["CP-0", "CP-MODEL"], prompts=prompts)
     first = (case.work / "attempts" / "CP-0" / "1" / "prompt.md").read_text(encoding="utf-8")
-    second = (case.work / "attempts" / "CP-1" / "1" / "prompt.md").read_text(encoding="utf-8")
+    second = (case.work / "attempts" / "CP-MODEL" / "1" / "prompt.md").read_text(encoding="utf-8")
     assert "handoffs/CP-0.md" not in first
     assert "handoffs/CP-0.md (sha256 " in second
 
@@ -285,6 +298,21 @@ def test_sandbox_violation_logged(case: Case) -> None:
     assert case.log()[0]["outcome"] == "sandbox"
 
 
+def test_sandbox_outcome_logs_the_routed_model(case: Case) -> None:
+    stream = "".join(
+        json.dumps(e) + "\n"
+        for e in (
+            {"type": "session.auto_mode_resolved", "data": {"chosenModel": "gpt-6-luna"}},
+            {"type": "tool.execution_start", "data": {"toolCallId": "t", "toolName": "bash"}},
+            {"type": "tool.execution_complete", "data": {"toolCallId": "t", "success": True}},
+            {"type": "result", "exitCode": 0},
+        )
+    )
+    with pytest.raises(SandboxViolation):
+        run_case(case.case, case.work, gh=case.script(stream, events(VALID)))
+    assert case.log()[0]["model"] == "gpt-6-luna"
+
+
 def test_pathways_match_fw_presets() -> None:
     assert set(PATHWAYS) == {
         "credit_snapshot",
@@ -298,7 +326,7 @@ def test_pathways_match_fw_presets() -> None:
         "CP-0", "CP-1", "CP-MODEL", "CP-1A", "CP-2", "CP-4", "CP-3", "CP-5", "CP-6",
     )  # fmt: skip
     assert all(m[0] == "CP-0" for m in PATHWAYS.values())
-    assert IMPLEMENTED == {"CP-0"}
+    assert IMPLEMENTED == {"CP-0", "CP-1"}
     assert all((PROMPTS_DIR / f"{m}.md").is_file() for m in IMPLEMENTED)
 
 
@@ -771,3 +799,196 @@ def test_fingerprint_ignores_retry_content(case: Case) -> None:
     assert case.calls() == 2
     run_case(case.case, case.work, gh=gh)
     assert case.calls() == 2
+
+
+PAGE = (
+    "Acme Corp annual report FY2024\n"
+    "Total debt 24,581 senior notes\n"
+    "Finance leases 487 total\n"
+    "Cash and cash equivalents 6,261\n"
+)
+DEBT = "Total debt 24,581 senior notes"
+LEASES = "Finance leases 487 total"
+CASH = "Cash and cash equivalents 6,261"
+
+
+def cp1_handoff(debt: str = "25068") -> str:
+    def part(value: str, quote: str) -> dict[str, object]:
+        return {"value": value, "source": "a.txt", "page": 1, "quote": quote}
+
+    block = {
+        "currency": "USD",
+        "unit": "m",
+        "periods": ["fy-2024"],
+        "rows": [
+            {
+                "field": "total_debt",
+                "period": "fy-2024",
+                "value": debt,
+                "derived": [part("24581", DEBT), part("487", LEASES)],
+            },
+            {"field": "cash_and_equivalents", "period": "fy-2024"} | part("6261", CASH),
+        ],
+    }
+    return f"""## Request
+
+Annual statements.
+
+## Sources
+
+- a.txt: annual report.
+
+## Findings
+
+Gross debt is "{DEBT}" [a.txt p.1] and cash is "{CASH}" [a.txt p.1].
+
+## Calculations
+
+```json
+{json.dumps(block, indent=1)}
+```
+
+## Gaps
+
+- None
+
+## Next module
+
+Readiness: READY.
+"""
+
+
+def cp1_case(case: Case, *handoffs: str) -> tuple[str, ...]:
+    (case.case / "a.txt").write_text(PAGE, encoding="utf-8")
+    return case.script(events(VALID), *(events(h) for h in handoffs))
+
+
+def test_calculation_json_written(case1: Case) -> None:
+    run_case(case1.case, case1.work, gh=cp1_case(case1, cp1_handoff()))
+    assert case1.calls() == 2
+    text = (case1.work / "calculation.json").read_text(encoding="utf-8")
+    calc = json.loads(text)
+    assert text == json.dumps(calc, indent=2, sort_keys=True)
+    assert calc["inputs"] == {"fy-2024": {"total_debt": "25068", "cash_and_equivalents": "6261"}}
+    assert calc["ratios"]["fy-2024"]["liquidity"] is None
+    assert (case1.work / "handoffs" / "CP-1.md").is_file()
+
+
+def test_calculator_finding_triggers_retry(case1: Case) -> None:
+    bad = cp1_handoff(debt="25069")
+    run_case(case1.case, case1.work, gh=cp1_case(case1, bad, cp1_handoff()))
+    assert case1.calls() == 3
+    _, first, second = case1.log()
+    assert first["outcome"] == "findings" and second["outcome"] == "accepted"
+    findings = first["findings"]
+    assert isinstance(findings, list) and len(findings) == 1
+    finding = str(findings[0])
+    assert finding.startswith(engine.CALC_PREFIX) and "not the sum of its components" in finding
+    assert (case1.work / "attempts" / "CP-1" / "1" / "findings.txt").read_text(
+        encoding="utf-8"
+    ) == finding
+    retry = prompt_of(case1, "CP-1", 2)
+    assert finding in retry and engine.CALC_RULE in retry
+    assert engine.CALC_RULE not in prompt_of(case1, "CP-1", 1)
+    calc = json.loads((case1.work / "calculation.json").read_text(encoding="utf-8"))
+    assert calc["inputs"]["fy-2024"]["total_debt"] == "25068"
+
+
+def test_cp1_without_json_block_is_a_finding(case1: Case) -> None:
+    no_json = cp1_handoff().replace("```json", "```text")
+    run_case(case1.case, case1.work, gh=cp1_case(case1, no_json, cp1_handoff()))
+    assert "exactly one json block" in json.dumps(case1.log()[1]["findings"])
+    assert engine.CALC_RULE not in prompt_of(case1, "CP-1", 2)
+
+
+def test_failed_cp1_leaves_no_calculation(case1: Case) -> None:
+    bad = cp1_handoff(debt="25069")
+    gh = cp1_case(case1, cp1_handoff(), bad, bad, bad)
+    run_case(case1.case, case1.work, gh=gh)
+    assert (case1.work / "calculation.json").is_file()
+    (case1.work / "handoffs" / "CP-1.fp").unlink()
+    with pytest.raises(ModuleFailed):
+        run_case(case1.case, case1.work, gh=gh)
+    assert not (case1.work / "calculation.json").exists()
+
+
+def test_cp1_calculation_recomputed_on_resume(case1: Case) -> None:
+    gh = cp1_case(case1, cp1_handoff())
+    run_case(case1.case, case1.work, gh=gh)
+    path = case1.work / "calculation.json"
+    before = path.read_text(encoding="utf-8")
+    path.unlink()
+    run_case(case1.case, case1.work, gh=gh)
+    assert case1.calls() == 2
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_cp1_calculator_finding_on_resume_reruns(case1: Case) -> None:
+    gh = cp1_case(case1, cp1_handoff(), cp1_handoff())
+    run_case(case1.case, case1.work, gh=gh)
+    stored = case1.work / "handoffs" / "CP-1.md"
+    fp = stored.with_suffix(".fp")
+    fingerprint = fp.read_text(encoding="utf-8")
+    stored.write_text(cp1_handoff(debt="25069"), encoding="utf-8")
+    assert fp.read_text(encoding="utf-8") == fingerprint  # the fp still matches
+    run_case(case1.case, case1.work, gh=gh)
+    assert case1.calls() == 3
+    assert stored.read_text(encoding="utf-8") == cp1_handoff()
+    assert "25068" in (case1.work / "calculation.json").read_text(encoding="utf-8")
+
+
+def test_cp1_is_implemented_and_prompt_keeps_the_amendments() -> None:
+    assert "CP-1" in IMPLEMENTED and "CP-1" in engine.CALCULATORS
+    text = " ".join((PROMPTS_DIR / "CP-1.md").read_text(encoding="utf-8").split()).lower()
+    for phrase in (
+        "separate reported facts from calculations",
+        "reconcile the relevant expense block",
+        "treat instants as instants",
+        "judge readiness for the requested use",
+        "write the markdown handoff",
+        "prefer the gross principal amount of debt over carrying value and state which you used",
+        "ebitda as defined is `adjusted_ebitda` when the issuer reports it",
+        "its page map is a pointer, not evidence",
+        "every `value` is a json string",
+        "`maturity_<year>`",
+        "cash-flow quality, liquidity, data quality, definition risks, key gaps",
+        "non-debt liability detail line",
+        "every sourced value and every derived component",
+    ):
+        assert phrase in text, phrase
+    for field in cp1.FIELDS:
+        assert f"`{field}`" in text, field
+
+
+def test_calculator_findings_reach_the_first_retry_with_checker_findings(case1: Case) -> None:
+    both = cp1_handoff().replace("## Findings\n\n", "## Findings\n\nAn unquoted claim.\n\n")
+    both = both.replace(f'"quote": "{CASH}"', '"quote": "Cash and cash equivalents 9,999"')
+    run_case(case1.case, case1.work, gh=cp1_case(case1, both, cp1_handoff()))
+    assert case1.calls() == 3
+    findings = case1.log()[1]["findings"]
+    assert isinstance(findings, list)
+    assert any(engine.NO_QUOTE in f for f in findings)
+    assert any(f.startswith(engine.CALC_PREFIX) and "quote not found" in f for f in findings)
+    stored = (case1.work / "attempts" / "CP-1" / "1" / "findings.txt").read_text(encoding="utf-8")
+    assert stored == "\n".join(findings)
+    retry = prompt_of(case1, "CP-1", 2)
+    assert all(f in retry for f in findings) and engine.CALC_RULE in retry
+    assert case1.log()[2]["outcome"] == "accepted"
+    assert (case1.work / "calculation.json").is_file()
+
+
+def test_unparsable_json_block_runs_no_calculator(case1: Case) -> None:
+    broken = cp1_handoff().replace('"currency"', '"currency" "USD"')
+    run_case(case1.case, case1.work, gh=cp1_case(case1, broken, cp1_handoff()))
+    findings = case1.log()[1]["findings"]
+    assert isinstance(findings, list) and len(findings) == 1
+    assert "does not parse" in findings[0] and not findings[0].startswith(engine.CALC_PREFIX)
+
+
+def test_json_null_block_is_a_calculator_finding(case1: Case) -> None:
+    null = cp1_handoff()
+    start, end = null.index("```json\n") + 8, null.index("\n```\n\n## Gaps")
+    null = null[:start] + "null" + null[end:]
+    run_case(case1.case, case1.work, gh=cp1_case(case1, null, cp1_handoff()))
+    findings = case1.log()[1]["findings"]
+    assert findings == [engine.CALC_PREFIX + "block must be a JSON object"]

@@ -363,3 +363,49 @@ def test_reused_tool_call_id_does_not_hide_a_forbidden_success() -> None:
     assert parse_events(stream).ran == ("create",)
     with pytest.raises(SandboxViolation, match="create"):
         parse_events([*stream[:-1], result_line(1)])
+
+
+# ---- Task 2.2b: `rg` is the grep tool's name under GPT-family routing ----
+
+RG_TEXT_START = "## Request\n\nExtract TransDigm Group"
+
+
+def test_rg_alias_fixture_is_not_a_violation() -> None:
+    r = parse_events(lines("rg-alias-events.jsonl"))
+    assert r.forbidden_tools == ()
+    assert r.violations == ()
+    assert r.ran == ()
+    assert r.text.startswith(RG_TEXT_START)
+    assert r.model == "gpt-6-luna"
+
+
+def test_rg_alias_fixture_passes_through_call(tmp_path: Path) -> None:
+    assert run(tmp_path, "rg-alias-events.jsonl").ran == ()
+
+
+def test_argv_never_offers_rg(tmp_path: Path) -> None:
+    a = argv_of(tmp_path)
+    assert a[a.index("--available-tools") + 1] == "view,grep,glob"
+    assert "rg" not in ",".join(a).split(",")
+
+
+def test_near_miss_names_of_rg_are_still_forbidden() -> None:
+    def ran(name: str) -> list[str]:
+        return [start("c", name), done("c"), FINAL, result_line()]
+
+    for name in ("ripgrep", "RG", "rg ", "rg.exe"):
+        r = parse_events(ran(name))
+        assert r.ran == (name,)
+        assert r.forbidden_tools == (name,)
+
+
+def test_sandbox_violation_carries_the_routed_model(tmp_path: Path) -> None:
+    with pytest.raises(SandboxViolation) as info:
+        run(tmp_path, "synthetic-forbidden-tool-events.jsonl")
+    assert info.value.model == "synthetic-model"
+
+
+def test_sandbox_violation_model_is_none_when_stream_never_named_it() -> None:
+    with pytest.raises(SandboxViolation) as info:
+        parse_events([start("c", "create"), done("c")])
+    assert info.value.model is None

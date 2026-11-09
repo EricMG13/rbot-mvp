@@ -27,5 +27,5 @@ PATHWAYS: dict[str, tuple[str, ...]] = {
     ),
     "portfolio_decision": ("CP-0", "CP-1", "CP-MODEL", "CP-2", "CP-3", "CP-5", "CP-6", "CP-8"),
 }
-IMPLEMENTED: frozenset[str] = frozenset({"CP-0"})
+IMPLEMENTED: frozenset[str] = frozenset({"CP-0", "CP-1"})
 PROMPTS_DIR = Path(__file__).parent / "prompts"
