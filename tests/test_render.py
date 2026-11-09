@@ -282,6 +282,22 @@ def test_ebitda_basis_footnote(work: Path, tmp_path: Path) -> None:
     assert key_metrics(with_calc(work, calc)).count(note) == 1
 
 
+@pytest.mark.parametrize("char", ["\u202e", "\ud800"])
+def test_period_label_sanitised_everywhere(work: Path, tmp_path: Path, char: str) -> None:
+    calc = tdg_calculation(tmp_path)
+    bad = f"fy-2024{char}gpj"
+    calc["periods"] = [bad]
+    calc["ratios"] = {bad: calc["ratios"]["fy-2024"]}
+    out = with_calc(work, calc)  # must not raise UnicodeEncodeError
+    assert char not in out and "fy-2024\ufffdgpj" in out
+
+
+def test_malformed_calculation_fails_loudly(work: Path) -> None:
+    (work / "calculation.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        html_of(work)
+
+
 def test_hostile_period_labels_escaped(work: Path, tmp_path: Path) -> None:
     calc = tdg_calculation(tmp_path)
     evil = '<script>evil()</script>"onload=x'

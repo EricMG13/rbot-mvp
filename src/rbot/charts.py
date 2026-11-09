@@ -13,7 +13,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
-from html import escape
+
+from rbot.markdown import esc
 
 _NS = "http://www.w3.org/2000/svg"
 _CHART_ID = re.compile(r"[A-Za-z0-9_-]+")
@@ -57,12 +58,11 @@ def _n(value: float) -> str:
 def _el(tag: str, text: str | None = None, **attrs: str) -> str:
     """One element; every attribute value and the text are escaped."""
     parts = "".join(
-        f' {name.rstrip("_").replace("_", "-")}="{escape(value, quote=True)}"'
-        for name, value in attrs.items()
+        f' {name.rstrip("_").replace("_", "-")}="{esc(value)}"' for name, value in attrs.items()
     )
     if text is None:
         return f"<{tag}{parts}/>"
-    return f"<{tag}{parts}>{escape(text, quote=True)}</{tag}>"
+    return f"<{tag}{parts}>{esc(text)}</{tag}>"
 
 
 def _series_class(spec: ChartSpec, series: str) -> int:
@@ -157,62 +157,77 @@ def _marker(index: int, x: float, y: float, cls: int, label: str) -> str:
     return f"<g>{_el('title', label)}{shape}</g>"
 
 
-def _line(spec: ChartSpec) -> str:
-    categories = spec.categories
-    points = {(m.series, m.category): m for m in spec.marks}
-    values = [float(m.value) for m in spec.marks if m.value is not None]
-    low, high = _bounds(values, 1.15)
-    ticks = _ticks(low, high, 3)
-    span = _WIDTH - _LEFT - _RIGHT
+@dataclass(frozen=True)
+class _Plot:
+    """The plot area: maps a category index and a value to coordinates."""
 
-    def x_of(i: int) -> float:
-        inner = span - 2 * _EDGE  # keep end points clear of the axis labels
-        step = inner / 2 if len(categories) == 1 else i * inner / (len(categories) - 1)
+    count: int
+    low: float
+    high: float
+
+    def x_of(self, i: int) -> float:
+        inner = _WIDTH - _LEFT - _RIGHT - 2 * _EDGE  # keep end points clear of the axis labels
+        step = inner / 2 if self.count == 1 else i * inner / (self.count - 1)
         return _LEFT + _EDGE + step
 
-    def y_of(v: float) -> float:
-        return _TOP + (_HEIGHT - _TOP - _BOTTOM) * (1 - (v - low) / (high - low))
+    def y_of(self, v: float) -> float:
+        return _TOP + (_HEIGHT - _TOP - _BOTTOM) * (1 - (v - self.low) / (self.high - self.low))
 
-    out = [_axis_y(spec, ticks, y_of, _LEFT, _WIDTH - _RIGHT)]
+
+def _series_line(spec: ChartSpec, series: str, plot: _Plot) -> str:
+    """The polyline of one series (broken at a null) and its end label."""
+    cls = _series_class(spec, series)
+    points = {m.category: m for m in spec.marks if m.series == series}
+    path, pen, last = "", False, None
+    for i, category in enumerate(spec.categories):
+        mark = points.get(category)
+        if mark is None or mark.value is None:
+            pen = False
+            continue
+        y = plot.y_of(float(mark.value))
+        path += f"{'L' if pen else 'M'}{_n(plot.x_of(i))} {_n(y)}"
+        pen, last = True, (i, mark.value, y)
+    out = _el("path", d=path, class_=f"ln k{cls}") if path else ""
+    if last is not None:
+        i, value, y = last
+        out += _el(
+            "text",
+            _mark_text(spec, value),
+            x=_n(plot.x_of(i) + 9),
+            y=_n(y + 4),
+            class_=f"lb f{cls}",
+        )
+    return out
+
+
+def _series_marks(spec: ChartSpec, si: int, series: str, plot: _Plot) -> str:
+    """The point markers of one series; a null draws an n/a slot."""
+    cls = _series_class(spec, series)
+    points = {m.category: m for m in spec.marks if m.series == series}
+    out = []
+    for i, category in enumerate(spec.categories):
+        mark = points.get(category)
+        if mark is None:
+            continue
+        if mark.value is None:
+            out.append(_na_slot(plot.x_of(i), _TOP + 2))
+            continue
+        label = f"{series}, {category}: {_mark_text(spec, mark.value)}"
+        out.append(_marker(si, plot.x_of(i), plot.y_of(float(mark.value)), cls, label))
+    return "".join(out)
+
+
+def _line(spec: ChartSpec) -> str:
+    values = [float(m.value) for m in spec.marks if m.value is not None]
+    low, high = _bounds(values, 1.15)
+    plot = _Plot(len(spec.categories), low, high)
+    out = [_axis_y(spec, _ticks(low, high, 3), plot.y_of, _LEFT, _WIDTH - _RIGHT)]
     out += [
-        _el("text", c, x=_n(x_of(i)), y=str(_HEIGHT - 8), text_anchor="middle", class_="ax")
-        for i, c in enumerate(categories)
+        _el("text", c, x=_n(plot.x_of(i)), y=str(_HEIGHT - 8), text_anchor="middle", class_="ax")
+        for i, c in enumerate(spec.categories)
     ]
-    for series in spec.series:
-        cls = _series_class(spec, series)
-        path, pen, last = "", False, None
-        for i, category in enumerate(categories):
-            mark = points.get((series, category))
-            if mark is None or mark.value is None:
-                pen = False
-                continue
-            y = y_of(float(mark.value))
-            path += f"{'L' if pen else 'M'}{_n(x_of(i))} {_n(y)}"
-            pen, last = True, (i, mark.value, y)
-        if path:
-            out.append(_el("path", d=path, class_=f"ln k{cls}"))
-        if last is not None:
-            i, value, y = last
-            out.append(
-                _el(
-                    "text",
-                    _mark_text(spec, value),
-                    x=_n(x_of(i) + 9),
-                    y=_n(y + 4),
-                    class_=f"lb f{cls}",
-                )
-            )
-    for si, series in enumerate(spec.series):
-        cls = _series_class(spec, series)
-        for i, category in enumerate(categories):
-            mark = points.get((series, category))
-            if mark is None:
-                continue
-            if mark.value is None:
-                out.append(_na_slot(x_of(i), _TOP + 2))
-                continue
-            label = f"{series}, {category}: {_mark_text(spec, mark.value)}"
-            out.append(_marker(si, x_of(i), y_of(float(mark.value)), cls, label))
+    out += [_series_line(spec, s, plot) for s in spec.series]
+    out += [_series_marks(spec, si, s, plot) for si, s in enumerate(spec.series)]
     return "".join(out)
 
 

@@ -63,6 +63,15 @@ def test_hostile_text_is_escaped() -> None:
     assert "&lt;script&gt;" in out and "&quot;" in out
 
 
+@pytest.mark.parametrize("char", ["\u202e", "\u2066", "\ud800"])
+def test_chart_text_uses_the_report_sanitiser(char: str) -> None:
+    label = f"fy{char}x"
+    marks = (ChartMark("G", label, Decimal("1")), ChartMark("G", "fy-b", Decimal("2")))
+    out = render_svg(ChartSpec("line", "x", (label, "fy-b"), marks), chart_id="a", title=f"T{char}")
+    assert char not in out and "fy\ufffdx" in out
+    out.encode("utf-8")  # a lone surrogate would raise here
+
+
 @pytest.mark.parametrize("bad", ["", "a b", 'a"b', "a<b", "a/b"])
 def test_chart_id_validated(bad: str) -> None:
     with pytest.raises(ValueError, match="chart_id"):
