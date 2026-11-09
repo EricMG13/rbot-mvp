@@ -1,10 +1,11 @@
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from rbot.handoff import SECTIONS, check, json_block, normalise
+from rbot.handoff import SECTIONS, check, json_block, normalise, section_units
 
 BODY = "\n\n".join(f"## {s}\nx" for s in SECTIONS)
 
@@ -214,3 +215,100 @@ def test_quoted_findings_accepts_fully_quoted(tmp_path: Path) -> None:
         '1. "The issuer is Acme Corp." [x.htm p.1]\n```\nunquoted fenced line\n```'
     )
     assert check(text, root, quoted_findings=True) == []
+
+
+FOX = "The quick brown fox jumps over the lazy dog."
+
+
+@pytest.mark.parametrize(("opener", "closer"), [("‘", "’"), ("«", "»"), ("＂", "＂"), ("„", "“")])
+def test_other_delimiters_are_checked_when_cited(tmp_path: Path, opener: str, closer: str) -> None:
+    root = pages(tmp_path, p0001=FOX)
+    good = f"- {opener}quick brown fox jumps{closer} [x.htm p.1]"
+    assert check(doc(good), root, quoted_findings=True) == []
+    bad = f"- {opener}fabricated growth of 40 percent{closer} [x.htm p.1]. {good[2:]}"
+    out = check(doc(bad), root, quoted_findings=True)
+    assert len(out) == 1 and "quote not found on x.htm p.1" in out[0]
+    short = f"- {opener}EPS{closer} [x.htm p.1]. {good[2:]}"
+    assert any("could not be paired" in f for f in check(doc(short), root, quoted_findings=True))
+    orphan = f"- no opener here{closer} [x.htm p.1]. {good[2:]}"
+    assert any("could not be paired" in f for f in check(doc(orphan), root, quoted_findings=True))
+
+
+def test_other_delimiters_count_as_findings_quotes(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0001=FOX)
+    assert check(doc("- «quick brown fox jumps» [x.htm p.1]"), root, quoted_findings=True) == []
+
+
+def test_uncited_apostrophe_and_single_quotes_are_never_findings(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0001=FOX)
+    prose = (
+        'Stockholders’ Deficit grew; ‘core’ and «core» words. "quick brown fox jumps" [x.htm p.1]'
+    )
+    assert check(doc(prose), root) == []
+
+
+def test_german_span_does_not_swallow_a_later_curly_quote(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0001=FOX)
+    text = doc(
+        "- „fabricated growth of 40 percent“ [x.htm p.1] and “quick brown fox jumps” [x.htm p.1]"
+    )
+    out = check(text, root)
+    assert len(out) == 1 and "fabricated" in out[0]
+
+
+def test_normalise_folds_unicode_hyphens_and_drops_soft_hyphen() -> None:
+    assert normalise("a\u2010b\u2011c\u2212d e\xadf") == "a-b-c-d ef"
+
+
+def test_section_units_follow_the_renderer_grammar() -> None:
+    text = doc(
+        "#1 risk: para\n\n- item one\n  continued\nlazy line\n### Sub\n```\n- fenced\n```\n"
+        "1. num\n+ plus"
+    )
+    assert section_units(text, "Findings") == [
+        "#1 risk: para",
+        "item one continued",
+        "lazy line",
+        "num",
+        "+ plus",
+    ]
+
+
+def test_hash_paragraph_and_lazy_line_need_their_own_quote(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0001=FOX)
+    quote = '"quick brown fox jumps" [x.htm p.1]'
+    for body in (f"#1 risk: leverage is high.\n\n- {quote}", f"- {quote}\nLeverage is high."):
+        out = check(doc(body), root, quoted_findings=True)
+        assert len(out) == 1 and "Findings item with no verified quote" in out[0]
+
+
+LIVE = (
+    (
+        "/Users/ericguei/rbot-cases/out/tdg-s1e/handoffs/CP-0.md",
+        "/Users/ericguei/rbot-cases/out/tdg-s1e/source-text",
+        True,
+    ),
+    (
+        "/private/tmp/claude-501/rbot-live/work-2b/handoffs/CP-0.md",
+        "/private/tmp/claude-501/rbot-live/work-2b/source-text",
+        False,
+    ),
+)
+
+
+@pytest.mark.parametrize(("handoff", "source_text", "quoted"), LIVE)
+def test_accepted_live_handoffs_still_pass(handoff: str, source_text: str, quoted: bool) -> None:
+    md, st_ = Path(handoff), Path(source_text)
+    if not (md.is_file() and st_.is_dir()):
+        pytest.skip("live case folder absent")
+    assert check(md.read_text(encoding="utf-8"), st_, quoted_findings=quoted) == []
+
+
+@pytest.mark.parametrize("hashes", ["#####", "######"])
+def test_deep_hash_paragraph_is_a_finding_unit(tmp_path: Path, hashes: str) -> None:
+    root = pages(tmp_path, p0001=FOX)
+    quote = '"quick brown fox jumps" [x.htm p.1]'
+    out = check(
+        doc(f"- {quote}\n\n{hashes} Leverage is above 7x, unquoted."), root, quoted_findings=True
+    )
+    assert len(out) == 1 and "Findings item with no verified quote" in out[0]

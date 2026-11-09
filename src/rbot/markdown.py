@@ -8,7 +8,9 @@ never passed through: every text run is escaped with ``html.escape(quote=True)``
 import html
 import re
 
-from rbot.handoff import FENCE, split_lines
+from rbot.handoff import BULLET as _BULLET
+from rbot.handoff import FENCE, HEADING, split_lines
+from rbot.handoff import NUMBER as _NUMBER
 
 _INLINE = re.compile(
     r"`(?P<code>[^`]+)`"
@@ -16,9 +18,6 @@ _INLINE = re.compile(
     r"|\*(?P<em>[^*\s](?:[^*]*[^*\s])?)\*"
     r"|\[(?P<link>[^\][]{1,500})\]\([^)]{0,2000}\)"
 )
-_HEADING = re.compile(r"(#{1,4})\s+(.*)")
-_BULLET = re.compile(r"[-*]\s+(.*)")
-_NUMBER = re.compile(r"\d+[.)]\s+(.*)")
 _RULE_CELL = re.compile(r":?-+:?")
 _UNSAFE = re.compile("[\ud800-\udfff\u202a-\u202e\u2066-\u2069]")
 
@@ -26,12 +25,6 @@ _UNSAFE = re.compile("[\ud800-\udfff\u202a-\u202e\u2066-\u2069]")
 def esc(text: str) -> str:
     """Escape a text run; lone surrogates and bidi override/isolate characters become U+FFFD."""
     return html.escape(_UNSAFE.sub("\ufffd", text), quote=True)
-
-
-def item_text(line: str) -> str | None:
-    """The text of a ``-`` or ``1.`` list item line, or None when the line is not an item."""
-    m = _BULLET.match(line.strip()) or _NUMBER.match(line.strip())
-    return m.group(1) if m else None
 
 
 def _heading_text(text: str) -> str:
@@ -140,7 +133,7 @@ def _starts_block(lines: list[str], i: int) -> bool:
     line = lines[i]
     return bool(
         FENCE.match(line)
-        or _HEADING.match(line.strip())
+        or HEADING.match(line.strip())
         or _BULLET.match(line.strip())
         or _NUMBER.match(line.strip())
         or _is_table_start(lines, i)
@@ -160,7 +153,7 @@ def to_html(md: str, shift: int = 0) -> str:
         elif FENCE.match(line):
             block, i = _code(lines, i)
             out.append(block)
-        elif (h := _HEADING.match(stripped)) is not None:
+        elif (h := HEADING.match(stripped)) is not None:
             level = min(len(h.group(1)) + shift, 6)
             out.append(f"<h{level}>{inline(_heading_text(h.group(2)))}</h{level}>")
             i += 1
