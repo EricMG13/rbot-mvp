@@ -9,3 +9,5 @@ src/rbot/assets/fonts/RedHatText-Regular.woff2 <- src/deploy_vii/assets/fonts/Re
 src/rbot/assets/fonts/RedHatText-SemiBold.woff2 <- src/deploy_vii/assets/fonts/RedHatText-SemiBold.woff2
 src/rbot/assets/fonts/RedHatMono-Medium.woff2 <- src/deploy_vii/assets/fonts/RedHatMono-Medium.woff2
 edited src/rbot/assets/shell.html <- src/deploy_vii/assets/shell.html
+edited src/rbot/pathways.py <- src/deploy_vii/contracts.py
+edited src/rbot/prompts/CP-0.md <- src/deploy_vii/methods/cp0.md
