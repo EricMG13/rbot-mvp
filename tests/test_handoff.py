@@ -151,3 +151,29 @@ def test_blank_quote_and_deep_json(tmp_path: Path) -> None:
     assert "empty" in check(doc('"              " [x.htm p.1]'), root)[0]
     deep = "```json\n" + "[" * 100000 + "]" * 100000 + "\n```"
     assert check(doc("f", deep), tmp_path, require_json=True)
+
+
+FAB = '"Revenue grew 50% in fiscal 2024." [x.htm p.1]'
+
+
+def test_stray_quote_cannot_silence_fabricated_quote(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0001="Revenue grew 5% in fiscal 2024.")
+    unclosed = check(doc(f'He said "hi. {FAB}'), root)
+    assert any("unclosed quote" in f for f in unclosed)
+    assert any("could not be paired before [x.htm p.1]" in f for f in unclosed)
+    assert check(doc(f'The 12" pipe line is new. {FAB}'), root)
+    earlier = doc(FAB).replace("## Sources\nx", '## Sources\nThe 3" item')
+    found = check(earlier, root)
+    assert any("not found" in f for f in found)
+    assert not any("unclosed" in f for f in found)
+
+
+def test_unpaired_short_cited_quote_and_paraphrase(tmp_path: Path) -> None:
+    root = pages(tmp_path, p0001="Revenue grew")
+    assert any("could not be paired" in f for f in check(doc('The "EPS" [x.htm p.1]'), root))
+    assert check(doc("Revenue grew [x.htm p.1]"), root) == []
+
+
+def test_spaced_dash_wrap() -> None:
+    assert normalise("The company —\nnot the parent") == "The company - not the parent"
+    assert normalise("The company—\nnot") == "The company-not"

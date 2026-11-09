@@ -13,12 +13,17 @@ _CITATION = re.compile(r"\s*\[([^\]]+?) p\.(\d+)\]")
 _H2 = re.compile(r"^## (.+?)\s*$")
 _FENCE = re.compile(r"^```\s*(\S*)\s*$")
 _TRANSLATE = str.maketrans("“”‘’–—", "\"\"''--")
+_SPACED_DASH_WRAP = re.compile(r"(?<=\s)[–—]\s*\n\s*")
 _DASH_WRAP = re.compile(r"[–—]\s*\n\s*")
+_MARK = re.compile(r"[\"“”]")
+_MARK_CITED = re.compile(r"[\"”]\s*\[([^\]]+?) p\.(\d+)\]")
+_PARAGRAPHS = re.compile(r"\n\s*\n")
 
 
 def normalise(text: str, hyphen_wrap: str = "") -> str:
     """Canonical form; `hyphen_wrap` replaces an ASCII `-\\n` (removed, or kept as `-`)."""
     text = unicodedata.normalize("NFKC", text).replace("-\n", hyphen_wrap)
+    text = _SPACED_DASH_WRAP.sub("- ", text)
     text = _DASH_WRAP.sub("-", text).translate(_TRANSLATE)
     return " ".join(text.split())
 
@@ -106,13 +111,12 @@ def _prose(text: str) -> str:
 
 
 def _quote_finding(
-    m: re.Match[str], prose: str, source_text: Path, cache: dict[tuple[str, str], str | None]
+    quote: str,
+    cite: re.Match[str] | None,
+    source_text: Path,
+    cache: dict[tuple[str, str], str | None],
 ) -> str | None:
-    quote = m.group(1) if m.group(1) is not None else m.group(2)
-    if len(quote) < 12:
-        return None
     shown = quote[:60]
-    cite = _CITATION.match(prose, m.end())
     if not cite:
         return f'quote with no citation right after it: "{shown}"'
     name, number = cite.groups()
@@ -130,12 +134,34 @@ def _quote_finding(
     return None
 
 
+def _paragraph_findings(
+    para: str, source_text: Path, cache: dict[tuple[str, str], str | None]
+) -> list[str]:
+    """Fail closed: an unpaired quote mark or an unverified cited mark is a finding."""
+    out: list[str] = []
+    spans: list[tuple[int, int]] = []
+    verified: set[int] = set()
+    for m in _QUOTE.finditer(para):
+        spans.append(m.span())
+        quote = m.group(1) if m.group(1) is not None else m.group(2)
+        if len(quote) >= 12:
+            verified.add(m.end())
+            finding = _quote_finding(quote, _CITATION.match(para, m.end()), source_text, cache)
+            out += [finding] if finding else []
+    for mark in _MARK.finditer(para):
+        if not any(a <= mark.start() < b for a, b in spans):
+            out.append(f'unclosed quote: "{para[mark.start() + 1 :][:60]}"')
+    for cm in _MARK_CITED.finditer(para):
+        if cm.start() + 1 not in verified:
+            out.append(f"cited quote could not be paired before [{cm.group(1)} p.{cm.group(2)}]")
+    return out
+
+
 def check(text: str, source_text: Path, *, require_json: bool = False) -> list[str]:
     out = _section_findings(text)
-    prose = _prose(text)
     cache: dict[tuple[str, str], str | None] = {}
-    found = (_quote_finding(m, prose, source_text, cache) for m in _QUOTE.finditer(prose))
-    out += [f for f in found if f]
+    for para in _PARAGRAPHS.split(_prose(text)):
+        out += _paragraph_findings(para, source_text, cache)
     if require_json and (err := _parse(text)[1]):
         out.append(err)
     return out
