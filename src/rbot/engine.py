@@ -236,6 +236,11 @@ NO_QUOTE = "Findings item with no verified quote"
 QUOTE_RULE = (
     "Back every Findings item with at least one verbatim quote (12+ characters) and its citation."
 )
+NOT_FOUND = "quote not found on"
+GREP_RULE = (
+    "For each quote not found: search source-text/<file>/ with your grep tool for a distinctive "
+    "part of the quote and cite the page file it is in (p0111.txt is p.111), or drop the quote."
+)
 
 
 def _accepted(handoff: Path, fp: Path, fingerprint: str, source_text: Path) -> bool:
@@ -258,6 +263,7 @@ def _run_module(module: str, prompt: str, setup: Setup) -> None:
         if findings:
             rules = [CITATION_RULE] * any(NO_CITATION in f for f in findings)
             rules += [QUOTE_RULE] * any(NO_QUOTE in f for f in findings)
+            rules += [GREP_RULE] * any(NOT_FOUND in f for f in findings)
             rule = "".join(f"\n{r}\n" for r in rules)
             text_prompt += (
                 "\n\n## Findings from your previous attempt\n\nFix every item and reply with the "

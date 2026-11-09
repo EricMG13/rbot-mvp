@@ -15,6 +15,11 @@ upstream handoffs named below.
 
 - Cite a page as `[<source file name> p.N]`, where N is the 1-based page number, for example
   `[annual-report.pdf p.12]`. Use the source file name exactly as listed.
+- N is the number in the page file's name: words read in `source-text/<file>/p0111.txt` are
+  cited `[<file> p.111]`. Cite the page file you read the words in, not a neighbouring page.
+- Before you reply, confirm every quote: search `source-text/<file>/` with your grep tool for a
+  distinctive part of the quote and cite the page file it is found in. Drop a quote you cannot
+  find.
 - Every quote carries its own citation immediately after the closing quote, before any other
   text, for example `"exact words" [file.htm p.12]`. This holds even when several quotes come
   from the same page: a citation at the end of a paragraph does not cover the quotes before it.

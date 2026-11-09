@@ -610,3 +610,39 @@ def test_failed_source_cleanup_fails_the_run(case: Case, monkeypatch: pytest.Mon
 def test_cp0_prompt_requires_gaps_for_limitations() -> None:
     text = " ".join((PROMPTS_DIR / "CP-0.md").read_text(encoding="utf-8").split())
     assert "`- None` only with READY" in text
+
+
+WRONG_PAGE = VALID.replace(
+    '"Acme Corp annual report" [a.txt p.1]', '"Second page distinctive words" [a.txt p.1]'
+)
+
+
+def two_page_source(case: Case) -> None:
+    text = "Acme Corp annual report FY2024".ljust(12000) + "Second page distinctive words"
+    (case.case / "a.txt").write_text(text, encoding="utf-8")
+
+
+def test_retry_adds_grep_rule_on_quote_not_found(case: Case) -> None:
+    two_page_source(case)
+    run_case(case.case, case.work, gh=case.script(events(WRONG_PAGE), events(VALID)))
+    first, second = case.log()
+    assert "quote not found on" in json.dumps(first["findings"])
+    assert second["outcome"] == "accepted"
+    assert engine.GREP_RULE in prompt_of(case, n=2)
+    assert engine.GREP_RULE not in prompt_of(case, n=1)
+
+
+def test_retry_omits_grep_rule_without_not_found(case: Case) -> None:
+    uncited = VALID.replace(
+        '"Acme Corp annual report" [a.txt p.1]', 'He said "Acme Corp annual report" and left.'
+    )
+    run_case(case.case, case.work, gh=case.script(events(uncited), events(VALID)))
+    assert "quote not found on" not in json.dumps(case.log()[0]["findings"])
+    assert engine.GREP_RULE not in prompt_of(case, n=2)
+
+
+def test_common_prompt_states_page_file_rule(case: Case) -> None:
+    run_case(case.case, case.work, gh=case.script(events(VALID)))
+    prompt = " ".join(prompt_of(case).split())
+    assert "p0111.txt" in prompt
+    assert "grep tool" in prompt
