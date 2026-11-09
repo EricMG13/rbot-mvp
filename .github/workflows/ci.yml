@@ -1,0 +1,57 @@
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gates:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.5"
+      - run: uv sync --group dev
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run mypy
+      - run: uv run pytest --cov=rbot --cov-fail-under=80
+      - run: uv run complexipy src --max-complexity-allowed 15
+      - run: uv run bandit -r src -q
+      # rbot itself is not on PyPI, so audit the locked third-party set (project excluded).
+      - run: uv export --frozen --no-emit-project --no-hashes -o audit-requirements.txt
+      - run: uv run pip-audit --strict --no-deps --disable-pip -r audit-requirements.txt
+      - run: uv lock --check
+  repo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.5"
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git
+      - run: npx --yes jscpd@4 --threshold 3 src
+      - run: python3 tools/suppressions.py
+      # Read-only: the pinned upstream commit's objects, over anonymous HTTPS. No token is used.
+      - name: fetch the copy source commit
+        run: |
+          sha="$(sed -n '1s/^source //p' tools/copied-from.txt | tr -d '\r')"
+          printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$' || { echo "bad source line in tools/copied-from.txt" >&2; exit 1; }
+          git fetch --no-tags --depth=1 https://github.com/EricMG13/final-workflow "$sha"
+      - env:
+          BASE_REF: ${{ github.base_ref }}
+        if: github.event_name == 'pull_request'
+        run: python3 tools/pr_size.py --base "origin/$BASE_REF"
