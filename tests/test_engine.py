@@ -412,13 +412,27 @@ def test_symlink_in_case_is_refused(case: Case, tmp_path: Path) -> None:
     assert not (case.work / "sources" / "notes.txt").exists()
 
 
-@pytest.mark.parametrize("name", ["AR [2024].txt", "x\ny.txt", "x\x01y.txt", "x\x7fy.txt"])
+NO_CTRL_ON_WINDOWS = pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows forbids control characters in file names"
+)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "AR [2024].txt",
+        pytest.param("x\ny.txt", marks=NO_CTRL_ON_WINDOWS),
+        pytest.param("x\x01y.txt", marks=NO_CTRL_ON_WINDOWS),
+        pytest.param("x\x7fy.txt", marks=NO_CTRL_ON_WINDOWS),
+    ],
+)
 def test_unsafe_source_name_is_refused(case: Case, name: str) -> None:
     (case.case / name).write_text("text", encoding="utf-8")
     with pytest.raises(SourceError, match="rename the file"):
         run_case(case.case, case.work, gh=case.script(events(VALID)))
 
 
+@NO_CTRL_ON_WINDOWS
 def test_unsafe_skipped_name_is_refused(case: Case) -> None:
     (case.case / "y\n\n## Upstream handoffs.docx").write_bytes(b"PK")
     with pytest.raises(SourceError, match="rename the file"):
