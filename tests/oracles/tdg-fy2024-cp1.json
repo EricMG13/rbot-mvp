@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "repo": "EricMG13/final-workflow",
+    "commit": "fda70c29296797766ecfd52908b57740eb3bafef",
+    "file": "runs/cpos-launch-live-002/deliveries/ce11d9e8935764e843a605d47cde34a903c34888c3364b29df87574c3a370954/CP-1.md",
+    "lines": {"interest_expense_net": 46, "ebitda": 61, "adjusted_ebitda": 62, "cash_and_equivalents": 63,
+              "gross_leverage": 119, "net_leverage": 120, "interest_cover": 122, "total_debt": 233},
+    "written_by": "controller; implementers never edit this file"
+  },
+  "currency": "USD",
+  "unit": "m",
+  "inputs": {
+    "fy-2024": {"adjusted_ebitda": "4173", "ebitda": "3813", "cash_and_equivalents": "6261",
+                "interest_expense_net": "1286",
+                "total_debt": {"value": "25068", "derived": ["24581", "487"]}},
+    "fy-2023": {"adjusted_ebitda": "3395", "ebitda": "3148", "cash_and_equivalents": "3472",
+                "interest_expense_net": "1164",
+                "total_debt": {"value": "19913", "derived": ["19563", "350"]}}
+  },
+  "outputs_2dp": {
+    "fy-2024": {"gross_leverage": "6.01", "net_leverage": "4.51", "interest_cover": "3.24"},
+    "fy-2023": {"gross_leverage": "5.87", "net_leverage": "4.84", "interest_cover": "2.92"}
+  }
+}
