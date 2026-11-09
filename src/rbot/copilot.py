@@ -58,7 +58,7 @@ class _Stream:
         self.forbidden: list[str] = []
         self.denied: list[str] = []
         self.ran: list[str] = []
-        self.started: dict[str, object] = {}  # toolCallId -> name (execution_complete has none)
+        self.started: dict[str, list[object]] = {}  # toolCallId -> every start's name
         self.text: str | None = None
         self.model: str | None = None
         self.chosen: str | None = None
@@ -66,30 +66,38 @@ class _Stream:
         self.result: dict[str, Any] | None = None
 
     def message(self, data: dict[str, Any]) -> None:
-        requests = data.get("toolRequests") or []
+        requests = [] if (raw := data.get("toolRequests")) is None else raw
+        if not isinstance(requests, list):
+            raise CopilotError("assistant.message: toolRequests is not a list")
         for req in requests:
             if not isinstance(req, dict) or req.get("name") not in READ_ONLY_TOOLS:
                 _add(self.forbidden, req.get("name") if isinstance(req, dict) else None)
         if not requests:
-            self.text, self.model = data.get("content", ""), data.get("model")
+            content = data.get("content", "")
+            if not isinstance(content, str):
+                raise CopilotError("assistant.message: content is not a string")
+            self.text, self.model = content, data.get("model")
 
     def start(self, data: dict[str, Any]) -> None:
         name = data.get("toolName")
-        self.started[str(data.get("toolCallId"))] = name
+        self.started.setdefault(str(data.get("toolCallId")), []).append(name)
         if name not in READ_ONLY_TOOLS:
             _add(self.forbidden, name)
 
     def complete(self, data: dict[str, Any]) -> None:
-        name = self.started.get(str(data.get("toolCallId")), UNNAMED)
+        names = self.started.get(str(data.get("toolCallId"))) or [UNNAMED]
         error = data.get("error")
         if (
             data.get("success") is False
             and isinstance(error, dict)
             and error.get("code") == "denied"
         ):
-            _add(self.denied, name)
-        elif data.get("success") is True and name not in READ_ONLY_TOOLS:
-            _add(self.ran, name)
+            for name in names:
+                _add(self.denied, name)
+        elif data.get("success") is True:
+            for name in names:  # a reused id may hide a forbidden start behind a read-only one
+                if name not in READ_ONLY_TOOLS:
+                    _add(self.ran, name)
 
     def feed(self, event: Any) -> None:
         if not isinstance(event, dict):
@@ -116,18 +124,49 @@ class _Stream:
             self.result = event
 
 
+def maybe_ran(lines: Iterable[str]) -> tuple[str, ...]:
+    """Tolerant scan: forbidden tools started or completed (a started one may have run)."""
+    stream = _Stream()
+    for raw in lines:
+        try:
+            event = json.loads(raw)
+        except (ValueError, RecursionError):  # bad JSON, huge int, deep nesting: skip the line
+            continue
+        data = event.get("data") if isinstance(event, dict) else None
+        if isinstance(data, dict) and event.get("type") == "tool.execution_start":
+            stream.start(data)
+        elif isinstance(data, dict) and event.get("type") == "tool.execution_complete":
+            stream.complete(data)
+    return tuple(dict.fromkeys((*stream.ran, *stream.forbidden)))
+
+
+def _violation(ran: tuple[str, ...]) -> SandboxViolation:
+    return SandboxViolation(f"tool outside read-only set ran: {', '.join(ran)}")
+
+
 def parse_events(lines: Iterable[str]) -> CallResult:
+    """Parse a stream; a completed forbidden tool wins over any other failure (SandboxViolation)."""
+    kept = list(lines)
+    try:
+        return _parse(kept)
+    except CopilotError as err:  # a SandboxViolation from _parse never reaches here
+        if ran := maybe_ran(kept):
+            raise _violation(ran) from err
+        raise
+
+
+def _parse(lines: Iterable[str]) -> CallResult:
     stream = _Stream()
     for raw in lines:
         if raw.strip():
             try:
                 stream.feed(json.loads(raw))
-            except json.JSONDecodeError as err:
+            except (ValueError, RecursionError) as err:
                 raise CopilotError(f"unparseable event line: {err}") from err
     if stream.result is None:
         raise CopilotError("no result line in the event stream")
     code = stream.result.get("exitCode")
-    if code != 0:
+    if type(code) is not int or code != 0:
         raise CopilotError(f"result reported exit {code}")
     if stream.text is None:
         raise CopilotError("no final assistant message in the event stream")
@@ -231,17 +270,24 @@ def call(  # noqa: PLR0913
     out = out.replace(b"\r\n", b"\n")
     (attempt / "events.jsonl").write_bytes(out)
     (attempt / "stderr.txt").write_bytes(err)
+    lines = out.decode("utf-8", errors="replace").split("\n")
+    failure = None
     if code is None:
-        raise CopilotError(f"timeout after {timeout:g} s")
-    if code != 0:
+        failure = f"timeout after {timeout:g} s"
+    elif code != 0:
         text = err.decode("utf-8", errors="replace").strip()[:STDERR_LIMIT]
-        raise CopilotError(f"gh copilot exit {code}: {text}")
-    try:
-        decoded = out.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CopilotError(f"stdout is not valid UTF-8: {exc}") from None
+        failure = f"gh copilot exit {code}: {text}"
+    else:
+        try:
+            out.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            failure = f"stdout is not valid UTF-8: {exc}"
+    if failure:
+        if ran := maybe_ran(lines):
+            raise _violation(ran)
+        raise CopilotError(failure)
     # split on LF only: str.splitlines also splits on U+2028 that JSON may carry unescaped
-    result = parse_events(decoded.split("\n"))
+    result = parse_events(lines)
     if result.ran:
-        raise SandboxViolation(f"tool outside read-only set ran: {', '.join(result.ran)}")
+        raise _violation(result.ran)
     return replace(result, seconds=time.monotonic() - started)
