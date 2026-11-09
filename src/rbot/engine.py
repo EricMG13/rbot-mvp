@@ -194,6 +194,7 @@ def _log(work: Path, **entry: Any) -> None:
 type Calculator = Callable[[object, Path], tuple[dict[str, object], list[str]]]
 CALCULATORS: dict[str, Calculator] = {"CP-1": cp1.compute}
 CALC_PREFIX = "calculator: "
+JSON_BLOCK = "json block"  # in both of the checker's JSON findings
 CALC_RULE = (
     "Each JSON row's quote must be copied from its cited page and print the row's value as one "
     "number; fix or drop the row."
@@ -203,18 +204,20 @@ CALC_RULE = (
 def _validate(
     module: str, text: str, source_text: Path
 ) -> tuple[list[str], dict[str, object] | None]:
-    """The checker's findings, then (only if there are none) the module's calculator's.
+    """The checker's findings, then the module's calculator's, together.
 
-    A module in CALCULATORS must carry its JSON block. Returns the findings and, when the handoff
-    is clean, the calculation (None for a module without a calculator)."""
+    A module in CALCULATORS must carry its JSON block. The calculator runs whenever that block
+    parses, so its findings reach the model with the checker's. Returns the findings and, when
+    there are none, the calculation (None for a module without a calculator)."""
     calculator = CALCULATORS.get(module)
     found = check(text, source_text, require_json=calculator is not None, quoted_findings=True)
-    if found or calculator is None:
+    block = json_block(text)
+    # No block, or one that does not parse, is the checker's finding alone; a parsed `null` is not.
+    if calculator is None or (block is None and any(JSON_BLOCK in f for f in found)):
         return found, None
-    calc, calc_found = calculator(json_block(text), source_text)
-    if calc_found:
-        return [CALC_PREFIX + f for f in calc_found], None
-    return [], calc
+    calc, calc_found = calculator(block, source_text)
+    found += [CALC_PREFIX + f for f in calc_found]
+    return found, (None if found else calc)
 
 
 def _findings(

@@ -958,3 +958,37 @@ def test_cp1_is_implemented_and_prompt_keeps_the_amendments() -> None:
         assert phrase in text, phrase
     for field in cp1.FIELDS:
         assert f"`{field}`" in text, field
+
+
+def test_calculator_findings_reach_the_first_retry_with_checker_findings(case1: Case) -> None:
+    both = cp1_handoff().replace("## Findings\n\n", "## Findings\n\nAn unquoted claim.\n\n")
+    both = both.replace(f'"quote": "{CASH}"', '"quote": "Cash and cash equivalents 9,999"')
+    run_case(case1.case, case1.work, gh=cp1_case(case1, both, cp1_handoff()))
+    assert case1.calls() == 3
+    findings = case1.log()[1]["findings"]
+    assert isinstance(findings, list)
+    assert any(engine.NO_QUOTE in f for f in findings)
+    assert any(f.startswith(engine.CALC_PREFIX) and "quote not found" in f for f in findings)
+    stored = (case1.work / "attempts" / "CP-1" / "1" / "findings.txt").read_text(encoding="utf-8")
+    assert stored == "\n".join(findings)
+    retry = prompt_of(case1, "CP-1", 2)
+    assert all(f in retry for f in findings) and engine.CALC_RULE in retry
+    assert case1.log()[2]["outcome"] == "accepted"
+    assert (case1.work / "calculation.json").is_file()
+
+
+def test_unparsable_json_block_runs_no_calculator(case1: Case) -> None:
+    broken = cp1_handoff().replace('"currency"', '"currency" "USD"')
+    run_case(case1.case, case1.work, gh=cp1_case(case1, broken, cp1_handoff()))
+    findings = case1.log()[1]["findings"]
+    assert isinstance(findings, list) and len(findings) == 1
+    assert "does not parse" in findings[0] and not findings[0].startswith(engine.CALC_PREFIX)
+
+
+def test_json_null_block_is_a_calculator_finding(case1: Case) -> None:
+    null = cp1_handoff()
+    start, end = null.index("```json\n") + 8, null.index("\n```\n\n## Gaps")
+    null = null[:start] + "null" + null[end:]
+    run_case(case1.case, case1.work, gh=cp1_case(case1, null, cp1_handoff()))
+    findings = case1.log()[1]["findings"]
+    assert findings == [engine.CALC_PREFIX + "block must be a JSON object"]
