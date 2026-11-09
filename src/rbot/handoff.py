@@ -128,16 +128,14 @@ def _prose(text: str) -> str:
     return "\n".join(line for line, fenced, _ in _lines(text) if not fenced)
 
 
-def _quote_finding(
+def _verify(
     quote: str,
-    cite: re.Match[str] | None,
+    name: str,
+    number: str,
     source_text: Path,
     cache: dict[tuple[str, str], str | None],
 ) -> str | None:
     shown = quote[:60]
-    if not cite:
-        return f'quote with no citation right after it: "{shown}"'
-    name, number = cite.groups()
     where = f"{name} p.{number}"
     if (name, number) not in cache:
         cache[name, number] = _page(source_text, name, number)
@@ -150,6 +148,23 @@ def _quote_finding(
     if not any(wanted in normalise(page, wrap) for wrap in ("", "-")):
         return f'quote not found on {where}: "{shown}"'
     return None
+
+
+def verify_quote(quote: str, source: str, page: int, source_text: Path) -> str | None:
+    """A finding if `quote` is not verbatim on page `page` of `source`, else None."""
+    return _verify(quote, source, str(page), source_text, {})
+
+
+def _quote_finding(
+    quote: str,
+    cite: re.Match[str] | None,
+    source_text: Path,
+    cache: dict[tuple[str, str], str | None],
+) -> str | None:
+    if not cite:
+        return f'quote with no citation right after it: "{quote[:60]}"'
+    name, number = cite.groups()
+    return _verify(quote, name, number, source_text, cache)
 
 
 def _blank(text: str, start: int, end: int) -> str:
