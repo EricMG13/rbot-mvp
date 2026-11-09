@@ -298,6 +298,21 @@ def test_sandbox_violation_logged(case: Case) -> None:
     assert case.log()[0]["outcome"] == "sandbox"
 
 
+def test_sandbox_outcome_logs_the_routed_model(case: Case) -> None:
+    stream = "".join(
+        json.dumps(e) + "\n"
+        for e in (
+            {"type": "session.auto_mode_resolved", "data": {"chosenModel": "gpt-6-luna"}},
+            {"type": "tool.execution_start", "data": {"toolCallId": "t", "toolName": "bash"}},
+            {"type": "tool.execution_complete", "data": {"toolCallId": "t", "success": True}},
+            {"type": "result", "exitCode": 0},
+        )
+    )
+    with pytest.raises(SandboxViolation):
+        run_case(case.case, case.work, gh=case.script(stream, events(VALID)))
+    assert case.log()[0]["model"] == "gpt-6-luna"
+
+
 def test_pathways_match_fw_presets() -> None:
     assert set(PATHWAYS) == {
         "credit_snapshot",

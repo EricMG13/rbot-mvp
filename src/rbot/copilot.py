@@ -11,7 +11,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-READ_ONLY_TOOLS = ("view", "grep", "glob")
+READ_ONLY_TOOLS = ("view", "grep", "glob")  # the only value passed as --available-tools
+# Names accepted in the event stream. `rg` is the built-in grep tool under GPT-family routing
+# (live capture 2026-11-09, gpt-6-luna: same arguments as `grep`, toolTitle "Searching files",
+# Disabled tools line unchanged); see docs/copilot-cli.md (b). Any other name is a violation.
+ACCEPTED_TOOL_NAMES = (*READ_ONLY_TOOLS, "rg")
 STDERR_LIMIT = 500
 KILL_WAIT = 5
 UNNAMED = "<unnamed>"
@@ -27,7 +31,11 @@ class CopilotError(Exception):
 
 
 class SandboxViolation(CopilotError):
-    """A tool outside READ_ONLY_TOOLS ran to success: the case folder may have been changed."""
+    """A tool outside ACCEPTED_TOOL_NAMES ran or started: the case folder may have been changed."""
+
+    def __init__(self, message: str, model: str | None = None) -> None:
+        super().__init__(message)
+        self.model = model  # routed model if the stream named it, for the run log
 
 
 @dataclass(frozen=True)
@@ -36,7 +44,9 @@ class CallResult:
     exit_code: int
     seconds: float
     credits: str | None  # session total, nanoAIU, as the digits Copilot reports
-    forbidden_tools: tuple[str, ...]  # tools outside READ_ONLY_TOOLS the model asked for or started
+    forbidden_tools: tuple[
+        str, ...
+    ]  # tools outside ACCEPTED_TOOL_NAMES the model asked for or started
     model: str | None  # routed model: session.auto_mode_resolved, else the final assistant.message
     denied: tuple[str, ...] = ()  # tools whose execution Copilot refused (error.code "denied")
     violations: tuple[
@@ -70,7 +80,7 @@ class _Stream:
         if not isinstance(requests, list):
             raise CopilotError("assistant.message: toolRequests is not a list")
         for req in requests:
-            if not isinstance(req, dict) or req.get("name") not in READ_ONLY_TOOLS:
+            if not isinstance(req, dict) or req.get("name") not in ACCEPTED_TOOL_NAMES:
                 _add(self.forbidden, req.get("name") if isinstance(req, dict) else None)
         if not requests:
             content = data.get("content", "")
@@ -81,7 +91,7 @@ class _Stream:
     def start(self, data: dict[str, Any]) -> None:
         name = data.get("toolName")
         self.started.setdefault(str(data.get("toolCallId")), []).append(name)
-        if name not in READ_ONLY_TOOLS:
+        if name not in ACCEPTED_TOOL_NAMES:
             _add(self.forbidden, name)
 
     def complete(self, data: dict[str, Any]) -> None:
@@ -96,7 +106,7 @@ class _Stream:
                 _add(self.denied, name)
         elif data.get("success") is True:
             for name in names:  # a reused id may hide a forbidden start behind a read-only one
-                if name not in READ_ONLY_TOOLS:
+                if name not in ACCEPTED_TOOL_NAMES:
                     _add(self.ran, name)
 
     def feed(self, event: Any) -> None:
@@ -124,8 +134,8 @@ class _Stream:
             self.result = event
 
 
-def maybe_ran(lines: Iterable[str]) -> tuple[str, ...]:
-    """Tolerant scan: forbidden tools started or completed (a started one may have run)."""
+def _scan(lines: Iterable[str]) -> _Stream:
+    """Tolerant scan: tool starts and completes, plus the routed model; bad lines are skipped."""
     stream = _Stream()
     for raw in lines:
         try:
@@ -133,15 +143,33 @@ def maybe_ran(lines: Iterable[str]) -> tuple[str, ...]:
         except (ValueError, RecursionError):  # bad JSON, huge int, deep nesting: skip the line
             continue
         data = event.get("data") if isinstance(event, dict) else None
-        if isinstance(data, dict) and event.get("type") == "tool.execution_start":
+        if not isinstance(data, dict):
+            continue
+        kind = event.get("type")
+        if kind == "tool.execution_start":
             stream.start(data)
-        elif isinstance(data, dict) and event.get("type") == "tool.execution_complete":
+        elif kind == "tool.execution_complete":
             stream.complete(data)
+        elif kind == "session.auto_mode_resolved":
+            stream.chosen = data.get("chosenModel")
+        elif kind == "assistant.message":
+            stream.model = data.get("model") or stream.model
+    return stream
+
+
+def maybe_ran(lines: Iterable[str]) -> tuple[str, ...]:
+    """Tolerant scan: forbidden tools started or completed (a started one may have run)."""
+    stream = _scan(lines)
     return tuple(dict.fromkeys((*stream.ran, *stream.forbidden)))
 
 
-def _violation(ran: tuple[str, ...]) -> SandboxViolation:
-    return SandboxViolation(f"tool outside read-only set ran: {', '.join(ran)}")
+def _violation(ran: tuple[str, ...], lines: Iterable[str]) -> SandboxViolation:
+    stream = _scan(lines)
+    model = stream.chosen or stream.model
+    return SandboxViolation(
+        f"tool outside read-only set ran: {', '.join(ran)}",
+        model if isinstance(model, str) else None,
+    )
 
 
 def parse_events(lines: Iterable[str]) -> CallResult:
@@ -151,7 +179,7 @@ def parse_events(lines: Iterable[str]) -> CallResult:
         return _parse(kept)
     except CopilotError as err:  # a SandboxViolation from _parse never reaches here
         if ran := maybe_ran(kept):
-            raise _violation(ran) from err
+            raise _violation(ran, kept) from err
         raise
 
 
@@ -284,10 +312,10 @@ def call(  # noqa: PLR0913
             failure = f"stdout is not valid UTF-8: {exc}"
     if failure:
         if ran := maybe_ran(lines):
-            raise _violation(ran)
+            raise _violation(ran, lines)
         raise CopilotError(failure)
     # split on LF only: str.splitlines also splits on U+2028 that JSON may carry unescaped
     result = parse_events(lines)
     if result.ran:
-        raise _violation(result.ran)
+        raise _violation(result.ran, lines)
     return replace(result, seconds=time.monotonic() - started)

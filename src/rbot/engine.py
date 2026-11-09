@@ -258,6 +258,8 @@ def _attempt(
     except Exception as err:  # logged, tagged with the module and re-raised: nothing is hidden
         err.add_note(f"module: {module}")
         outcome = "sandbox" if isinstance(err, SandboxViolation) else "error"
+        if isinstance(err, SandboxViolation) and err.model:
+            log["model"] = err.model
         _log_best_effort(setup.work, err, **log, outcome=outcome, findings=[str(err)])
         raise
 
