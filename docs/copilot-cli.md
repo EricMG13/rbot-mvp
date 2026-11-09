@@ -1,7 +1,7 @@
 # Copilot CLI, pinned from live runs (2026-11-09)
 
 Tool: `gh` 2.101 running Copilot CLI 1.0.105. Probe: `python3 tools/copilot_probe.py --out DIR [--model M] [--effort E] [--available-tools a,b] [--only n,...]`.
-Fixtures: `tests/fixtures/copilot/handoff-events.jsonl`, `write-attempt-events.jsonl` (paths and user name redacted; the opaque `apiCallId` blobs also redacted because gitleaks flags them).
+Fixtures: `tests/fixtures/copilot/handoff-events.jsonl`, `write-attempt-events.jsonl`, `escape-attempt-events.jsonl` (real: the model asked for `view` then `bash`, both denied; streamed fragments redacted in the first fragment of each call), plus `synthetic-forbidden-tool-events.jsonl` (hand-built, NOT a live capture: a `create` tool call) (paths and user name redacted; the opaque `apiCallId` blobs also redacted because gitleaks flags them).
 
 ## Deviation from the plan: the pinned model is not available
 

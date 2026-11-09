@@ -1,0 +1,6 @@
+{"type":"session.auto_mode_resolved","data":{"chosenModel":"synthetic-model"}}
+{"type":"assistant.message","data":{"model":"synthetic-model","content":"","toolRequests":[{"toolCallId":"call_syn1","name":"create","arguments":{"path":"b.txt","file_text":"hello"},"type":"function"}]}}
+{"type":"tool.execution_start","data":{"toolCallId":"call_syn1","toolName":"create","arguments":{"path":"b.txt","file_text":"hello"}}}
+{"type":"tool.execution_complete","data":{"toolCallId":"call_syn1","success":true}}
+{"type":"assistant.message","data":{"model":"synthetic-model","content":"done","toolRequests":[]}}
+{"type":"result","exitCode":0}
